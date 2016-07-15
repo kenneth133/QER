@@ -1,0 +1,53 @@
+use QER
+go
+IF OBJECT_ID('dbo.barra_risk_load') IS NOT NULL
+BEGIN
+    DROP PROCEDURE dbo.barra_risk_load
+    IF OBJECT_ID('dbo.barra_risk_load') IS NOT NULL
+        PRINT '<<< FAILED DROPPING PROCEDURE dbo.barra_risk_load >>>'
+    ELSE
+        PRINT '<<< DROPPED PROCEDURE dbo.barra_risk_load >>>'
+END
+go
+CREATE PROCEDURE dbo.barra_risk_load @MONTH_END_DT datetime = NULL
+AS
+
+IF @MONTH_END_DT IS NULL
+BEGIN
+  SELECT @MONTH_END_DT = SUBSTRING(CONVERT(varchar, GETDATE(), 112), 1, 6) + '01'
+  SELECT @MONTH_END_DT = DATEADD(DD, -1, @MONTH_END_DT)
+END
+
+UPDATE barra_risk_staging
+   SET BARRID = RTRIM(BARRID),
+       TICKER = RTRIM(TICKER),
+       CUSIP = RTRIM(CUSIP),
+       NAME = RTRIM(NAME),
+       SRISK_PCT = SRISK_PCT / 100.0,
+       TRISK_PCT = TRISK_PCT / 100.0,
+       WGT1_PCT = WGT1_PCT / 100.0,
+       WGT2_PCT = WGT2_PCT / 100.0,
+       WGT3_PCT = WGT3_PCT / 100.0,
+       WGT4_PCT = WGT4_PCT / 100.0,
+       WGT5_PCT = WGT5_PCT / 100.0,
+       YLD_PCT = YLD_PCT / 100.0
+
+DELETE barra_risk
+ WHERE month_end_dt = @MONTH_END_DT
+
+INSERT barra_risk
+SELECT @MONTH_END_DT, BARRID, TICKER, CUSIP, NAME,
+       HBTA, BETA, SRISK_PCT, TRISK_PCT, VOLTILTY, MOMENTUM, SIZE, SIZENONL,
+       TRADEACT, GROWTH, EARNYLD, VALUE, EARNVAR, LEVERAGE, CURRSEN, YIELD, NONESTU,
+       IND1, WGT1_PCT, IND2, WGT2_PCT, IND3, WGT3_PCT, IND4, WGT4_PCT, IND5, WGT5_PCT,
+       PRICE, CAPITALIZATION, YLD_PCT, SAP500, SAPVAL, SAPGRO,
+       MIDCAP, MIDVAL, MIDGRO, SC600, SCVAL, SCGRO, E3ESTU
+  FROM barra_risk_staging
+
+RETURN
+go
+IF OBJECT_ID('dbo.barra_risk_load') IS NOT NULL
+    PRINT '<<< CREATED PROCEDURE dbo.barra_risk_load >>>'
+ELSE
+    PRINT '<<< FAILED CREATING PROCEDURE dbo.barra_risk_load >>>'
+go
