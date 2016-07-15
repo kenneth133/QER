@@ -1,0 +1,56 @@
+use QER
+go
+
+create table dbo.barra_risk2 (
+  month_end_dt		datetime	not null,
+  barra_id		varchar(16)	not null,
+  ticker		varchar(16)	null,
+  cusip			varchar(32)	null,
+  name			varchar(64)	null,
+  hist_beta		float		null,
+  beta			float		null,
+  spec_risk		float		null,
+  tot_risk		float		null,
+  volatility		float		null,
+  momentum		float		null,
+  size			float		null,
+  size_nonlin		float		null,
+  trade_act		float		null,
+  growth		float		null,
+  earn_yield		float		null,
+  value			float		null,
+  earn_var		float		null,
+  leverage		float		null,
+  curr_sen		float		null,
+  dividend_yield	float		null,
+  in_non_est_univ	bit		null,
+  [1] float NULL, [2] float NULL, [3] float NULL, [4] float NULL, [5] float NULL,
+  [6] float NULL, [7] float NULL, [8] float NULL, [9] float NULL, [10] float NULL,
+  [11] float NULL, [12] float NULL, [13] float NULL, [14] float NULL, [15] float NULL,
+  [16] float NULL, [17] float NULL, [18] float NULL, [19] float NULL, [20] float NULL,
+  [21] float NULL, [22] float NULL, [23] float NULL, [24] float NULL, [25] float NULL,
+  [26] float NULL, [27] float NULL, [28] float NULL, [29] float NULL, [30] float NULL,
+  [31] float NULL, [32] float NULL, [33] float NULL, [34] float NULL, [35] float NULL,
+  [36] float NULL, [37] float NULL, [38] float NULL, [39] float NULL, [40] float NULL,
+  [41] float NULL, [42] float NULL, [43] float NULL, [44] float NULL, [45] float NULL,
+  [46] float NULL, [47] float NULL, [48] float NULL, [49] float NULL, [50] float NULL,
+  [51] float NULL, [52] float NULL, [53] float NULL, [54] float NULL, [55] float NULL, 
+  price			float		null,
+  capitalization	float		null,
+  yield			float		null,
+  in_SAP500		bit		null,
+  in_SAPVAL		bit		null,
+  in_SAPGRO		bit		null,
+  in_MIDCAP		bit		null,
+  in_MIDVAL		bit		null,
+  in_MIDGRO		bit		null,
+  in_SC600		bit		null,
+  in_SCVAL		bit		null,
+  in_SCGRO		bit		null,
+  in_E3ESTU		bit		null,
+  primary key (month_end_dt, barra_id)
+)
+go
+
+CREATE NONCLUSTERED INDEX IX_barra_risk2 ON barra_risk2 (month_end_dt, cusip)
+go
