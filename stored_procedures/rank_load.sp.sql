@@ -9,19 +9,21 @@ BEGIN
         PRINT '<<< DROPPED PROCEDURE dbo.rank_load >>>'
 END
 go
-CREATE PROCEDURE dbo.rank_load @RUN_TM datetime = NULL,
-                               @AS_OF_DATE datetime = NULL,
-                               @UNIVERSE_CD varchar(32),
-                               @FACTOR_CD varchar(32),
-                               @FACTOR_SOURCE_CD varchar(8) = NULL,
-                               @GROUPS int,
-                               @AGAINST varchar(1),
-                               @AGAINST_ID int = NULL,
-                               @RANK_WGT_ID int = NULL,
-                               @PERIOD_TYPE varchar(1) = NULL,
-                               @METHOD varchar(4) = 'MEAN',
-                               @MISSING_METHOD varchar(8) = 'MEDIAN',
-                               @MISSING_VALUE float = NULL
+CREATE PROCEDURE dbo.rank_load
+@RUN_TM datetime = NULL,
+@AS_OF_DATE datetime = NULL,
+@UNIVERSE_CD varchar(32),
+@FACTOR_CD varchar(32),
+@FACTOR_SOURCE_CD varchar(8) = NULL,
+@GROUPS int,
+@AGAINST varchar(1),
+@AGAINST_CD varchar(8) = NULL,
+@AGAINST_ID int = NULL,
+@RANK_WGT_ID int = NULL,
+@PERIOD_TYPE varchar(1) = NULL,
+@METHOD varchar(4) = 'MEAN',
+@MISSING_METHOD varchar(8) = 'MEDIAN',
+@MISSING_VALUE float = NULL
 AS
 
 IF NOT EXISTS (SELECT * FROM universe_def WHERE universe_cd = @UNIVERSE_CD)
@@ -30,10 +32,12 @@ IF NOT EXISTS (SELECT * FROM factor WHERE factor_cd = @FACTOR_CD)
   BEGIN SELECT 'ERROR: INVALID VALUE PASSED FOR @FACTOR_CD PARAMETER' RETURN -1 END
 IF @FACTOR_SOURCE_CD IS NOT NULL AND NOT EXISTS (SELECT * FROM decode WHERE item = 'SOURCE_CD' AND code = @FACTOR_SOURCE_CD)
   BEGIN SELECT 'ERROR: INVALID VALUE PASSED FOR @FACTOR_SOURCE_CD PARAMETER' RETURN -1 END
-IF @AGAINST NOT IN ('U', 'C', 'G')
+IF @AGAINST NOT IN ('U', 'C', 'G', 'Y')
   BEGIN SELECT 'ERROR: INVALID VALUE PASSED FOR @AGAINST PARAMETER' RETURN -1 END
-IF @AGAINST != 'U' AND @AGAINST_ID IS NULL
+IF @AGAINST IN ('C', 'G') AND @AGAINST_ID IS NULL
   BEGIN SELECT 'ERROR: PARAMETER @AGAINST_ID CANNOT BE NULL' RETURN -1 END
+IF @AGAINST = 'Y' AND @AGAINST_CD IS NULL
+  BEGIN SELECT 'ERROR: PARAMETER @AGAINST_CD CANNOT BE NULL' RETURN -1 END
 IF @AGAINST = 'C' AND NOT EXISTS (SELECT * FROM sector_def WHERE sector_id = @AGAINST_ID)
   BEGIN SELECT 'ERROR: INVALID VALUE PASSED FOR @AGAINST_ID PARAMETER' RETURN -1 END
 IF @AGAINST = 'G' AND NOT EXISTS (SELECT * FROM segment_def WHERE segment_id = @AGAINST_ID)
@@ -101,7 +105,7 @@ SELECT @FACTOR_ID = factor_id
   FROM factor
  WHERE factor_cd = @FACTOR_CD
 
-IF @AGAINST != 'U'
+IF @AGAINST IN ('C','G')
 BEGIN
   IF @AGAINST = 'C'
   BEGIN
@@ -126,9 +130,9 @@ END
 
 INSERT rank_inputs
       (run_tm, as_of_date, bdate, universe_dt, universe_id, factor_id, factor_source_cd,
-       groups, against, against_id, rank_wgt_id, period_type, method, missing_method, missing_value)
+       groups, against, against_cd, against_id, rank_wgt_id, period_type, method, missing_method, missing_value)
 SELECT DISTINCT @RUN_TM, @AS_OF_DATE, bdate, universe_dt, @UNIVERSE_ID, @FACTOR_ID, @FACTOR_SOURCE_CD,
-       @GROUPS, @AGAINST, @AGAINST_ID, @RANK_WGT_ID, @PERIOD_TYPE, @METHOD, @MISSING_METHOD, @MISSING_VALUE
+       @GROUPS, @AGAINST, @AGAINST_CD, @AGAINST_ID, @RANK_WGT_ID, @PERIOD_TYPE, @METHOD, @MISSING_METHOD, @MISSING_VALUE
   FROM #RANK_STAGING
 
 SELECT @RANK_EVENT_ID = MAX(rank_event_id)
@@ -162,6 +166,15 @@ BEGIN
      AND r.security_id = ss.security_id
      AND r.security_id IS NOT NULL
      AND ss.segment_id = @AGAINST_ID
+END
+ELSE IF @AGAINST = 'Y'
+BEGIN
+  INSERT rank_output (rank_event_id, security_id, factor_value, rank)
+  SELECT @RANK_EVENT_ID, r.security_id, r.factor_value, r.rank
+    FROM #RANK_STAGING r, equity_common..security y
+   WHERE r.security_id IS NOT NULL
+     AND r.security_id = y.security_id
+     AND y.issue_country_cd = @AGAINST_CD
 END
 
 DROP TABLE #RANK_STAGING

@@ -2,13 +2,13 @@ use QER
 go
 
 CREATE TABLE #DATA_SET (
-  security_id int		NULL,
-  mkt_cap	float		NULL,
-  factor_value float	NULL,
-  ordinal	int identity(1,1) NOT NULL,
-  rank		int			NULL,
-  eq_return	float		NULL,
-  cap_return float		NULL
+  security_id	int		NULL,
+  mkt_cap		float	NULL,
+  factor_value	float	NULL,
+  ordinal		int identity(1,1) NOT NULL,
+  rank			int		NULL,
+  eq_return		float	NULL,
+  cap_return	float	NULL
 )
 
 IF OBJECT_ID('dbo.rank_factor_compute') IS NOT NULL
@@ -20,8 +20,9 @@ BEGIN
         PRINT '<<< DROPPED PROCEDURE dbo.rank_factor_compute >>>'
 END
 go
-CREATE PROCEDURE dbo.rank_factor_compute @RANK_EVENT_ID int,
-                                         @DEBUG bit = NULL
+CREATE PROCEDURE dbo.rank_factor_compute
+@RANK_EVENT_ID int,
+@DEBUG bit = NULL
 AS
 
 DECLARE @GROUPS int,
@@ -74,7 +75,8 @@ UPDATE #DATA_SET
                    WHEN @METHOD LIKE 'LO%' THEN CONVERT(int,ROUND(ROUND(d.lo,1),0))
               END
   FROM #DISTINCT_SET d
- WHERE #DATA_SET.factor_value = d.factor_value
+ WHERE (#DATA_SET.factor_value = d.factor_value
+    OR (#DATA_SET.factor_value IS NULL AND d.factor_value IS NULL))
 
 IF @DEBUG = 1
 BEGIN

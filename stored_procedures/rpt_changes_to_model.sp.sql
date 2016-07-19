@@ -9,14 +9,15 @@ BEGIN
         PRINT '<<< DROPPED PROCEDURE dbo.rpt_changes_to_model >>>'
 END
 go
-CREATE PROCEDURE dbo.rpt_changes_to_model @BDATE datetime,
-                                          @STRATEGY_ID int,
-                                          @ACCOUNT_CD varchar(32),
-                                          @PERIODS int,
-                                          @PERIOD_TYPE varchar(2),
-                                          @REPORT_VIEW varchar(16),
-                                          @SCORE_CHANGE_MIN int = NULL,
-                                          @DEBUG bit = NULL
+CREATE PROCEDURE dbo.rpt_changes_to_model
+@BDATE datetime,
+@STRATEGY_ID int,
+@ACCOUNT_CD varchar(32),
+@PERIODS int,
+@PERIOD_TYPE varchar(2),
+@REPORT_VIEW varchar(16),
+@SCORE_CHANGE_MIN int = NULL,
+@DEBUG bit = NULL
 AS
 /* MODEL - MOVERS */
 
@@ -489,19 +490,20 @@ BEGIN
   CREATE TABLE #RANK_PARAMS (
     factor_id	int			NULL,
     against		varchar(1)	NULL,
+    against_cd	varchar(8)	NULL,
     against_id	int			NULL,
     weight		float		NULL
   )
 
-  INSERT #RANK_PARAMS
-  SELECT w.factor_id, w.against, NULL, w.weight
+  INSERT #RANK_PARAMS (factor_id, against, weight)
+  SELECT w.factor_id, w.against, w.weight
     FROM factor_against_weight w, strategy g
    WHERE g.strategy_id = @STRATEGY_ID
      AND g.factor_model_id = w.factor_model_id
      AND w.against = 'U'
 
   INSERT #RANK_PARAMS
-  SELECT w.factor_id, w.against, w.against_id, w.weight
+  SELECT w.factor_id, w.against, NULL, w.against_id, w.weight
     FROM factor_against_weight w, strategy g
    WHERE g.strategy_id = @STRATEGY_ID
      AND g.factor_model_id = w.factor_model_id
@@ -509,12 +511,19 @@ BEGIN
      AND w.against_id IN (SELECT DISTINCT sector_id FROM #RESULT WHERE sector_id IS NOT NULL)
 
   INSERT #RANK_PARAMS
-  SELECT w.factor_id, w.against, w.against_id, w.weight
+  SELECT w.factor_id, w.against, NULL, w.against_id, w.weight
     FROM factor_against_weight w, strategy g
    WHERE g.strategy_id = @STRATEGY_ID
      AND g.factor_model_id = w.factor_model_id
      AND w.against = 'G'
      AND w.against_id IN (SELECT DISTINCT segment_id FROM #RESULT WHERE segment_id IS NOT NULL)
+
+  INSERT #RANK_PARAMS
+  SELECT DISTINCT w.factor_id, w.against, r.country_cd, NULL, w.weight
+    FROM factor_against_weight w, strategy g, #RESULT r
+   WHERE g.strategy_id = @STRATEGY_ID
+     AND g.factor_model_id = w.factor_model_id
+     AND w.against = 'Y'
 
   IF @DEBUG = 1
   BEGIN
@@ -531,8 +540,10 @@ BEGIN
     factor_nm		varchar(255)	NULL,
 
     against			varchar(1)	NULL,
+    against_cd		varchar(8)	NULL,
     against_id		int			NULL,
-    weight			float		NULL,
+    weight1			float		NULL,
+    weight2			float		NULL,
 
     curr_rank		int		NULL,
     prev_rank		int		NULL,
@@ -544,7 +555,7 @@ BEGIN
    WHERE strategy_id = @STRATEGY_ID
 
   INSERT #RESULT2
-        (security_id, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight, curr_rank)
+        (security_id, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight1, curr_rank)
   SELECT r.security_id, f.factor_id, f.factor_cd, f.factor_short_nm, f.factor_nm, p.against, p.against_id, p.weight, o.rank
     FROM #RANK_PARAMS p, #RESULT r, rank_inputs i, rank_output o, factor f
    WHERE i.bdate = @BDATE
@@ -557,7 +568,7 @@ BEGIN
      AND r.security_id = o.security_id
 
   INSERT #RESULT2
-        (security_id, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight, curr_rank)
+        (security_id, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight1, curr_rank)
   SELECT r.security_id, f.factor_id, f.factor_cd, f.factor_short_nm, f.factor_nm, p.against, p.against_id, p.weight, o.rank
     FROM #RANK_PARAMS p, #RESULT r, rank_inputs i, rank_output o, factor f
    WHERE i.bdate = @BDATE
@@ -571,7 +582,7 @@ BEGIN
      AND r.security_id = o.security_id
 
   INSERT #RESULT2
-        (security_id, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight, curr_rank)
+        (security_id, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight1, curr_rank)
   SELECT r.security_id, f.factor_id, f.factor_cd, f.factor_short_nm, f.factor_nm, p.against, p.against_id, p.weight, o.rank
     FROM #RANK_PARAMS p, #RESULT r, rank_inputs i, rank_output o, factor f
    WHERE i.bdate = @BDATE
@@ -581,6 +592,20 @@ BEGIN
      AND i.against = p.against
      AND i.against = 'G'
      AND i.against_id = p.against_id
+     AND i.rank_event_id = o.rank_event_id
+     AND r.security_id = o.security_id
+
+  INSERT #RESULT2
+        (security_id, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_cd, weight1, curr_rank)
+  SELECT r.security_id, f.factor_id, f.factor_cd, f.factor_short_nm, f.factor_nm, p.against, p.against_cd, p.weight, o.rank
+    FROM #RANK_PARAMS p, #RESULT r, rank_inputs i, rank_output o, factor f
+   WHERE i.bdate = @BDATE
+     AND i.universe_id = @UNIVERSE_ID
+     AND i.factor_id = p.factor_id
+     AND p.factor_id = f.factor_id
+     AND i.against = p.against
+     AND i.against = 'Y'
+     AND i.against_cd = p.against_cd
      AND i.rank_event_id = o.rank_event_id
      AND r.security_id = o.security_id
 
@@ -625,6 +650,18 @@ BEGIN
      AND i.rank_event_id = o.rank_event_id
      AND #RESULT2.security_id = o.security_id
 
+  UPDATE #RESULT2
+     SET prev_rank = o.rank
+    FROM rank_inputs i, rank_output o
+   WHERE i.bdate = @PREV_BDATE
+     AND i.universe_id = @UNIVERSE_ID
+     AND i.factor_id = #RESULT2.factor_id
+     AND i.against = #RESULT2.against
+     AND i.against = 'Y'
+     AND i.against_cd = #RESULT2.against_cd
+     AND i.rank_event_id = o.rank_event_id
+     AND #RESULT2.security_id = o.security_id
+
   IF @DEBUG = 1
   BEGIN
     SELECT '#RESULT2 (2)'
@@ -632,7 +669,7 @@ BEGIN
   END
 
   INSERT #RESULT2
-        (security_id, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight, prev_rank)
+        (security_id, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight1, prev_rank)
   SELECT r.security_id, f.factor_id, f.factor_cd, f.factor_short_nm, f.factor_nm, p.against, p.against_id, p.weight, o.rank
     FROM #RANK_PARAMS p, #RESULT r, rank_inputs i, rank_output o, factor f
    WHERE i.bdate = @PREV_BDATE
@@ -646,7 +683,7 @@ BEGIN
      AND r.security_id NOT IN (SELECT security_id FROM #RESULT2 WHERE curr_rank IS NOT NULL)
 
   INSERT #RESULT2
-        (security_id, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight, prev_rank)
+        (security_id, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight1, prev_rank)
   SELECT r.security_id, f.factor_id, f.factor_cd, f.factor_short_nm, f.factor_nm, p.against, p.against_id, p.weight, o.rank
     FROM #RANK_PARAMS p, #RESULT r, rank_inputs i, rank_output o, factor f
    WHERE i.bdate = @PREV_BDATE
@@ -661,7 +698,7 @@ BEGIN
      AND r.security_id NOT IN (SELECT security_id FROM #RESULT2 WHERE curr_rank IS NOT NULL)
 
   INSERT #RESULT2
-        (security_id, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight, prev_rank)
+        (security_id, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight1, prev_rank)
   SELECT r.security_id, f.factor_id, f.factor_cd, f.factor_short_nm, f.factor_nm, p.against, p.against_id, p.weight, o.rank
     FROM #RANK_PARAMS p, #RESULT r, rank_inputs i, rank_output o, factor f
    WHERE i.bdate = @PREV_BDATE
@@ -675,6 +712,21 @@ BEGIN
      AND r.security_id = o.security_id
      AND r.security_id NOT IN (SELECT security_id FROM #RESULT2 WHERE curr_rank IS NOT NULL)
 
+  INSERT #RESULT2
+        (security_id, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_cd, weight1, prev_rank)
+  SELECT r.security_id, f.factor_id, f.factor_cd, f.factor_short_nm, f.factor_nm, p.against, p.against_cd, p.weight, o.rank
+    FROM #RANK_PARAMS p, #RESULT r, rank_inputs i, rank_output o, factor f
+   WHERE i.bdate = @PREV_BDATE
+     AND i.universe_id = @UNIVERSE_ID
+     AND i.factor_id = p.factor_id
+     AND p.factor_id = f.factor_id
+     AND i.against = p.against
+     AND i.against = 'Y'
+     AND i.against_cd = p.against_cd
+     AND i.rank_event_id = o.rank_event_id
+     AND r.security_id = o.security_id
+     AND r.security_id NOT IN (SELECT security_id FROM #RESULT2 WHERE curr_rank IS NOT NULL)
+
   IF @DEBUG = 1
   BEGIN
     SELECT '#RESULT2 (3)'
@@ -683,7 +735,7 @@ BEGIN
 
   --OVERRIDE WEIGHT LOGIC: BEGIN
   UPDATE #RESULT2
-     SET weight = o.override_wgt
+     SET weight1 = o.override_wgt
     FROM #RESULT r, strategy g, factor_against_weight_override o
    WHERE g.strategy_id = @STRATEGY_ID
      AND g.factor_model_id = o.factor_model_id
@@ -694,7 +746,7 @@ BEGIN
      AND o.level_id = r.segment_id
      and #RESULT2.security_id = r.security_id
   UPDATE #RESULT2
-     SET weight = o.override_wgt
+     SET weight1 = o.override_wgt
     FROM #RESULT r, strategy g, factor_against_weight_override o
    WHERE g.strategy_id = @STRATEGY_ID
      AND g.factor_model_id = o.factor_model_id
@@ -706,7 +758,7 @@ BEGIN
      AND o.level_id = r.segment_id
      AND #RESULT2.security_id = r.security_id
   UPDATE #RESULT2
-     SET weight = o.override_wgt
+     SET weight1 = o.override_wgt
     FROM #RESULT r, strategy g, factor_against_weight_override o
    WHERE g.strategy_id = @STRATEGY_ID
      AND g.factor_model_id = o.factor_model_id
@@ -719,7 +771,7 @@ BEGIN
      AND #RESULT2.security_id = r.security_id
 
   UPDATE #RESULT2
-     SET weight = o.override_wgt
+     SET weight1 = o.override_wgt
     FROM #RESULT r, strategy g, factor_against_weight_override o
    WHERE g.strategy_id = @STRATEGY_ID
      AND g.factor_model_id = o.factor_model_id
@@ -730,7 +782,7 @@ BEGIN
      AND o.level_id = r.sector_id
      and #RESULT2.security_id = r.security_id
   UPDATE #RESULT2
-     SET weight = o.override_wgt
+     SET weight1 = o.override_wgt
     FROM #RESULT r, strategy g, factor_against_weight_override o
    WHERE g.strategy_id = @STRATEGY_ID
      AND g.factor_model_id = o.factor_model_id
@@ -742,7 +794,7 @@ BEGIN
      AND o.level_id = r.sector_id
      AND #RESULT2.security_id = r.security_id
   UPDATE #RESULT2
-     SET weight = o.override_wgt
+     SET weight1 = o.override_wgt
     FROM #RESULT r, strategy g, factor_against_weight_override o
    WHERE g.strategy_id = @STRATEGY_ID
      AND g.factor_model_id = o.factor_model_id
@@ -755,7 +807,7 @@ BEGIN
      AND #RESULT2.security_id = r.security_id
 
   UPDATE #RESULT2
-     SET weight = o.override_wgt
+     SET weight1 = o.override_wgt
     FROM #RESULT r, strategy g, factor_against_weight_override o
    WHERE g.strategy_id = @STRATEGY_ID
      AND g.factor_model_id = o.factor_model_id
@@ -765,7 +817,7 @@ BEGIN
      AND o.level_type = 'U'
      and #RESULT2.security_id = r.security_id
   UPDATE #RESULT2
-     SET weight = o.override_wgt
+     SET weight1 = o.override_wgt
     FROM #RESULT r, strategy g, factor_against_weight_override o
    WHERE g.strategy_id = @STRATEGY_ID
      AND g.factor_model_id = o.factor_model_id
@@ -776,7 +828,7 @@ BEGIN
      AND o.level_type = 'U'
      AND #RESULT2.security_id = r.security_id
   UPDATE #RESULT2
-     SET weight = o.override_wgt
+     SET weight1 = o.override_wgt
     FROM #RESULT r, strategy g, factor_against_weight_override o
    WHERE g.strategy_id = @STRATEGY_ID
      AND g.factor_model_id = o.factor_model_id
@@ -786,6 +838,9 @@ BEGIN
      AND (r.segment_id = o.against_id OR (r.segment_id IS NULL AND o.against_id IS NULL))
      AND o.level_type = 'U'
      AND #RESULT2.security_id = r.security_id
+/*
+NOTE: CURRENTLY NO CODE TO OVERRIDE COUNTRY WEIGHTS;
+      REQUIRES ADDING COLUMN level_cd TO factor_against_weight_override */
   --OVERRIDE WEIGHT LOGIC: END
 
   IF @DEBUG = 1
@@ -794,10 +849,10 @@ BEGIN
     SELECT * FROM #RESULT2 ORDER BY security_id, against, factor_id
   END
 
-  DELETE #RESULT2 WHERE weight = 0.0
+  DELETE #RESULT2 WHERE weight1 = 0.0
 
   UPDATE #RESULT2
-     SET weight = weight * w.segment_ss_wgt * w.ss_total_wgt
+     SET weight2 = weight1 * w.segment_ss_wgt * w.ss_total_wgt
     FROM #RESULT r, strategy g, factor_model_weights w
    WHERE g.strategy_id = @STRATEGY_ID
      AND g.factor_model_id = w.factor_model_id
@@ -806,7 +861,17 @@ BEGIN
      AND (r.segment_id = w.segment_id OR (r.segment_id IS NULL AND w.segment_id IS NULL))
      AND #RESULT2.against = 'G'
   UPDATE #RESULT2
-     SET weight = weight * w.sector_ss_wgt * w.ss_total_wgt
+     SET weight2 = weight1 * w.segment_ss_wgt * w.ss_total_wgt
+    FROM #RESULT r, strategy g, factor_model_weights w
+   WHERE g.strategy_id = @STRATEGY_ID
+     AND g.factor_model_id = w.factor_model_id
+     AND #RESULT2.security_id = r.security_id
+     AND r.sector_id = w.sector_id
+     AND #RESULT2.against = 'G'
+     AND #RESULT2.weight2 IS NULL
+
+  UPDATE #RESULT2
+     SET weight2 = weight1 * w.sector_ss_wgt * w.ss_total_wgt
     FROM #RESULT r, strategy g, factor_model_weights w
    WHERE g.strategy_id = @STRATEGY_ID
      AND g.factor_model_id = w.factor_model_id
@@ -815,7 +880,17 @@ BEGIN
      AND (r.segment_id = w.segment_id OR (r.segment_id IS NULL AND w.segment_id IS NULL))
      AND #RESULT2.against = 'C'
   UPDATE #RESULT2
-     SET weight = weight * w.universe_total_wgt
+     SET weight2 = weight1 * w.sector_ss_wgt * w.ss_total_wgt
+    FROM #RESULT r, strategy g, factor_model_weights w
+   WHERE g.strategy_id = @STRATEGY_ID
+     AND g.factor_model_id = w.factor_model_id
+     AND #RESULT2.security_id = r.security_id
+     AND r.sector_id = w.sector_id
+     AND #RESULT2.against = 'C'
+     AND #RESULT2.weight2 IS NULL
+
+  UPDATE #RESULT2
+     SET weight2 = weight1 * w.universe_total_wgt
     FROM #RESULT r, strategy g, factor_model_weights w
    WHERE g.strategy_id = @STRATEGY_ID
      AND g.factor_model_id = w.factor_model_id
@@ -823,6 +898,34 @@ BEGIN
      AND (r.sector_id = w.sector_id OR (r.sector_id IS NULL AND w.sector_id IS NULL))
      AND (r.segment_id = w.segment_id OR (r.segment_id IS NULL AND w.segment_id IS NULL))
      AND #RESULT2.against = 'U'
+  UPDATE #RESULT2
+     SET weight2 = weight1 * w.universe_total_wgt
+    FROM #RESULT r, strategy g, factor_model_weights w
+   WHERE g.strategy_id = @STRATEGY_ID
+     AND g.factor_model_id = w.factor_model_id
+     AND #RESULT2.security_id = r.security_id
+     AND r.sector_id = w.sector_id
+     AND #RESULT2.against = 'U'
+     AND #RESULT2.weight2 IS NULL
+
+  UPDATE #RESULT2
+     SET weight2 = weight1 * w.country_total_wgt
+    FROM #RESULT r, strategy g, factor_model_weights w
+   WHERE g.strategy_id = @STRATEGY_ID
+     AND g.factor_model_id = w.factor_model_id
+     AND #RESULT2.security_id = r.security_id
+     AND (r.sector_id = w.sector_id OR (r.sector_id IS NULL AND w.sector_id IS NULL))
+     AND (r.segment_id = w.segment_id OR (r.segment_id IS NULL AND w.segment_id IS NULL))
+     AND #RESULT2.against = 'Y'
+  UPDATE #RESULT2
+     SET weight2 = weight1 * w.country_total_wgt
+    FROM #RESULT r, strategy g, factor_model_weights w
+   WHERE g.strategy_id = @STRATEGY_ID
+     AND g.factor_model_id = w.factor_model_id
+     AND #RESULT2.security_id = r.security_id
+     AND r.sector_id = w.sector_id
+     AND #RESULT2.against = 'Y'
+     AND #RESULT2.weight2 IS NULL
 
   UPDATE #RESULT2
      SET change_rank = curr_rank - prev_rank
@@ -840,9 +943,10 @@ BEGIN
   SELECT @SQL = @SQL + 'r2.factor_short_nm AS [Factor], '
   SELECT @SQL = @SQL + 'r2.factor_nm AS [Factor Name], '
   SELECT @SQL = @SQL + 'CASE r2.against WHEN ''U'' THEN ''UNIVERSE'' '
+  SELECT @SQL = @SQL + 'WHEN ''Y'' THEN ''COUNTRY'' '
   SELECT @SQL = @SQL + 'WHEN ''C'' THEN ''SECTOR'' '
   SELECT @SQL = @SQL + 'WHEN ''G'' THEN ''SEGMENT'' END AS [Relative To], '
-  SELECT @SQL = @SQL + 'r2.weight AS [Weight], '
+  SELECT @SQL = @SQL + 'r2.weight2 AS [Weight], '
   SELECT @SQL = @SQL + 'r2.curr_rank AS [Current Rank], '
   SELECT @SQL = @SQL + 'r2.prev_rank AS [Previous Rank], '
   SELECT @SQL = @SQL + 'r2.change_rank AS [Rank Change] '

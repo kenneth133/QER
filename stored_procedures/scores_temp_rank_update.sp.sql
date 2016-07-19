@@ -1,21 +1,21 @@
 use QER
 go
 
-CREATE TABLE #SS_SECURITY (
-  sector_id		int		NULL,
-  segment_id	int		NULL,
-  security_id	int		NULL
+CREATE TABLE #SECURITY_CLASS (
+  security_id	int			NULL,
+  sector_id		int			NULL,
+  segment_id	int			NULL,
+  country_cd	varchar(8)	NULL
 )
 
 CREATE TABLE #SCORES (
-  security_id	int		NULL,
-  sector_id		int		NULL,
-  segment_id	int		NULL,
-  sector_score	float	NULL,
-  segment_score	float	NULL,
-  ss_score		float	NULL,
-  universe_score float	NULL,
-  total_score	float	NULL
+  security_id		int		NULL,
+  sector_score		float	NULL,
+  segment_score		float	NULL,
+  ss_score			float	NULL,
+  universe_score	float	NULL,
+  country_score		float	NULL,
+  total_score		float	NULL
 )
 
 IF OBJECT_ID('dbo.scores_temp_rank_update') IS NOT NULL
@@ -27,27 +27,30 @@ BEGIN
         PRINT '<<< DROPPED PROCEDURE dbo.scores_temp_rank_update >>>'
 END
 go
-CREATE PROCEDURE dbo.scores_temp_rank_update @BDATE datetime = NULL, --optional, defaults to previous business day
-                                             @SCORE_TYPE varchar(16) = NULL, --required
-                                             @STRATEGY_ID int = NULL, --required
-                                             @DEBUG bit = NULL
+CREATE PROCEDURE dbo.scores_temp_rank_update
+@BDATE datetime = NULL, --optional, defaults to previous business day
+@SCORE_TYPE varchar(16) = NULL, --required
+@STRATEGY_ID int = NULL, --required
+@DEBUG bit = NULL
 AS
 
 SELECT @SCORE_TYPE = UPPER(@SCORE_TYPE)
 
-IF @SCORE_TYPE IS NULL OR (@SCORE_TYPE NOT IN ('SECTOR_SCORE','SEGMENT_SCORE','SS_SCORE','UNIVERSE_SCORE','TOTAL_SCORE'))
+IF @SCORE_TYPE IS NULL OR (@SCORE_TYPE NOT IN ('SECTOR_SCORE','SEGMENT_SCORE','SS_SCORE','UNIVERSE_SCORE','COUNTRY_SCORE','TOTAL_SCORE'))
   BEGIN SELECT 'ERROR: @SCORE_TYPE PARAMETER MUST BE PASSED' RETURN -1 END
 IF @STRATEGY_ID IS NULL
   BEGIN SELECT 'ERROR: @STRATEGY_ID PARAMETER MUST BE PASSED' RETURN -1 END
 
 DECLARE @AGAINST varchar(1),
+        @AGAINST_CD varchar(8),
         @AGAINST_ID int,
         @FACTOR_ID int,
         @GROUPS int,
         @UNIVERSE_ID int,
         @RANK_EVENT_ID_MIN int,
         @RANK_EVENT_ID_MAX int,
-        @NOW datetime
+        @NOW datetime,
+        @ORDINAL int
 
 SELECT @GROUPS = fractile
   FROM strategy
@@ -74,6 +77,7 @@ SELECT @BDATE, security_id, @FACTOR_ID,
                         WHEN 'SEGMENT_SCORE' THEN segment_score
                         WHEN 'SS_SCORE' THEN ss_score
                         WHEN 'UNIVERSE_SCORE' THEN universe_score
+                        WHEN 'COUNTRY_SCORE' THEN country_score
                         WHEN 'TOTAL_SCORE' THEN total_score END,
        @NOW, 'FS'
   FROM #SCORES
@@ -84,45 +88,59 @@ BEGIN
   SELECT * FROM instrument_factor WHERE bdate=@BDATE AND factor_id=@FACTOR_ID ORDER BY security_id
 END
 
-SELECT @RANK_EVENT_ID_MIN = max(rank_event_id) + 1
+SELECT @RANK_EVENT_ID_MIN = MAX(rank_event_id) + 1
   FROM rank_inputs
 
-IF @SCORE_TYPE IN ('SECTOR_SCORE', 'SS_SCORE', 'SEGMENT_SCORE')
+IF @SCORE_TYPE IN ('SECTOR_SCORE', 'SEGMENT_SCORE', 'SS_SCORE', 'COUNTRY_SCORE')
 BEGIN
-  CREATE TABLE #AGAINST_ID ( against_id int NOT NULL )
+  CREATE TABLE #AGAINST (
+    ordinal		int identity(1,1) NOT NULL,
+    against_id	int			NULL,
+    against_cd	varchar(8)	NULL
+  )
 
   IF @SCORE_TYPE IN ('SECTOR_SCORE', 'SS_SCORE')
   BEGIN
     SELECT @AGAINST = 'C'
 
-    INSERT #AGAINST_ID
-    SELECT DISTINCT sector_id
-      FROM #SS_SECURITY
+    INSERT #AGAINST (against_id)
+    SELECT DISTINCT sector_id FROM #SECURITY_CLASS
      WHERE sector_id IS NOT NULL
   END
-  ELSE --('SEGMENT_SCORE')
+  ELSE IF @SCORE_TYPE = 'SEGMENT_SCORE'
   BEGIN
     SELECT @AGAINST = 'G'
 
-    INSERT #AGAINST_ID
-    SELECT DISTINCT segment_id
-      FROM #SS_SECURITY
+    INSERT #AGAINST (against_id)
+    SELECT DISTINCT segment_id FROM #SECURITY_CLASS
      WHERE segment_id IS NOT NULL
   END
-
-  WHILE EXISTS (SELECT * FROM #AGAINST_ID)
+  ELSE IF @SCORE_TYPE = 'COUNTRY_SCORE'
   BEGIN
-    SELECT @AGAINST_ID = min(against_id)
-      FROM #AGAINST_ID
+    SELECT @AGAINST = 'Y'
 
-    EXEC rank_factor_universe @BDATE=@BDATE, @UNIVERSE_ID=@UNIVERSE_ID, @FACTOR_ID=@FACTOR_ID,
-                              @GROUPS=@GROUPS, @AGAINST=@AGAINST, @AGAINST_ID=@AGAINST_ID, @DEBUG=@DEBUG
-
-    DELETE #AGAINST_ID
-     WHERE against_id = @AGAINST_ID
+    INSERT #AGAINST (against_cd)
+    SELECT DISTINCT country_cd FROM #SECURITY_CLASS
+     WHERE country_cd IS NOT NULL
   END
 
-  DROP TABLE #AGAINST_ID
+  SELECT @ORDINAL = 0
+  WHILE EXISTS (SELECT * FROM #AGAINST WHERE ordinal > @ORDINAL)
+  BEGIN
+    SELECT @ORDINAL = MIN(ordinal)
+      FROM #AGAINST
+     WHERE ordinal > @ORDINAL
+
+    SELECT @AGAINST_ID = against_id,
+           @AGAINST_CD = against_cd
+      FROM #AGAINST
+     WHERE ordinal = @ORDINAL
+
+    EXEC rank_factor_universe @BDATE=@BDATE, @UNIVERSE_ID=@UNIVERSE_ID, @FACTOR_ID=@FACTOR_ID, @GROUPS=@GROUPS,
+                              @AGAINST=@AGAINST, @AGAINST_CD=@AGAINST_CD, @AGAINST_ID=@AGAINST_ID, @DEBUG=@DEBUG
+  END
+
+  DROP TABLE #AGAINST
 END
 ELSE --('UNIVERSE_SCORE', 'TOTAL_SCORE')
 BEGIN
@@ -130,7 +148,7 @@ BEGIN
                             @GROUPS=@GROUPS, @AGAINST='U', @DEBUG=@DEBUG
 END
 
-SELECT @RANK_EVENT_ID_MAX = max(rank_event_id)
+SELECT @RANK_EVENT_ID_MAX = MAX(rank_event_id)
   FROM rank_inputs
 
 UPDATE #SCORES
@@ -138,6 +156,7 @@ UPDATE #SCORES
        segment_score = CASE @SCORE_TYPE WHEN 'SEGMENT_SCORE' THEN o.rank ELSE #SCORES.segment_score END,
        ss_score = CASE @SCORE_TYPE WHEN 'SS_SCORE' THEN o.rank ELSE #SCORES.ss_score END,
        universe_score = CASE @SCORE_TYPE WHEN 'UNIVERSE_SCORE' THEN o.rank ELSE #SCORES.universe_score END,
+       country_score = CASE @SCORE_TYPE WHEN 'COUNTRY_SCORE' THEN o.rank ELSE #SCORES.country_score END,
        total_score = CASE @SCORE_TYPE WHEN 'TOTAL_SCORE' THEN o.rank ELSE #SCORES.total_score END
   FROM rank_output o
  WHERE o.rank_event_id >= @RANK_EVENT_ID_MIN
@@ -161,5 +180,5 @@ ELSE
 go
 
 DROP TABLE #SCORES
-DROP TABLE #SS_SECURITY
+DROP TABLE #SECURITY_CLASS
 go

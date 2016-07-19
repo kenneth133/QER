@@ -258,10 +258,11 @@ BEGIN
     SELECT '@LOWER_BOUND', @LOWER_BOUND
   END
 
-  CREATE TABLE #SS_SECURITY (
-    sector_id	int		NULL,
-    segment_id	int		NULL,
-    security_id	int		NULL
+  CREATE TABLE #SECURITY_CLASS (
+    security_id	int			NULL,
+    sector_id	int			NULL,
+    segment_id	int			NULL,
+    country_cd	varchar(8)	NULL
   )
 
   CREATE TABLE #SCORES (
@@ -270,6 +271,7 @@ BEGIN
     segment_score	float	NULL,
     ss_score		float	NULL,
     universe_score	float	NULL,
+    country_score	float	NULL,
     total_score		float	NULL
   )
 
@@ -287,19 +289,19 @@ BEGIN
   BEGIN
     IF DATEPART(DW, @ADATE) NOT IN (1, 7) AND NOT EXISTS (SELECT * FROM holiday WHERE schedule = 'NYSE' AND [date] = @ADATE)
     BEGIN
-      TRUNCATE TABLE #SS_SECURITY
+      TRUNCATE TABLE #SECURITY_CLASS
       TRUNCATE TABLE #SCORES
 
       INSERT #SCORES
-            (security_id, sector_score, segment_score, ss_score, universe_score, total_score)
-      SELECT security_id, sector_score, segment_score, ss_score, universe_score, total_score
+            (security_id, sector_score, segment_score, ss_score, universe_score, country_score, total_score)
+      SELECT security_id, sector_score, segment_score, ss_score, universe_score, country_score, total_score
         FROM scores
        WHERE strategy_id = @STRATEGY_ID
          AND bdate = @REBAL_BDATE
          AND security_id IS NOT NULL
 
-      INSERT #SS_SECURITY
-      SELECT ss.sector_id, ss.segment_id, ss.security_id
+      INSERT #SECURITY_CLASS (security_id, sector_id, segment_id)
+      SELECT ss.security_id, ss.sector_id, ss.segment_id
         FROM #SCORES s, sector_model_security ss
        WHERE ss.bdate = @REBAL_BDATE
          AND ss.sector_model_id = @SECTOR_MODEL_ID
@@ -307,10 +309,10 @@ BEGIN
          AND ss.security_id IS NOT NULL
          AND s.security_id IS NOT NULL
 
-      IF NOT EXISTS (SELECT * FROM #SS_SECURITY)
+      IF NOT EXISTS (SELECT * FROM #SECURITY_CLASS)
       BEGIN
-        INSERT #SS_SECURITY
-        SELECT DISTINCT NULL, NULL, security_id
+        INSERT #SECURITY_CLASS (security_id)
+        SELECT DISTINCT security_id
           FROM #SCORES
       END
 
@@ -318,11 +320,11 @@ BEGIN
       BEGIN
         SELECT '#SCORES: INITIAL STATE'
         SELECT * FROM #SCORES ORDER BY security_id
-        SELECT '#SS_SECURITY'
-        SELECT * FROM #SS_SECURITY ORDER BY security_id
+        SELECT '#SECURITY_CLASS'
+        SELECT * FROM #SECURITY_CLASS ORDER BY security_id
       END
 
-      IF EXISTS (SELECT * FROM decode WHERE item='NO REFRACTILE' AND code='TOTAL_SCORE' AND decode=@STRATEGY_ID) AND EXISTS (SELECT * FROM #SCORES)
+      IF NOT EXISTS (SELECT * FROM decode WHERE item='REFRACTILE' AND code='TOTAL_SCORE' AND decode=@STRATEGY_ID) AND EXISTS (SELECT * FROM #SCORES)
       BEGIN
         EXEC scores_temp_rank_update @BDATE=@REBAL_BDATE, @SCORE_TYPE='TOTAL_SCORE', @STRATEGY_ID=@STRATEGY_ID, @DEBUG=@DEBUG
         IF @DEBUG = 1
@@ -338,7 +340,7 @@ BEGIN
        WHERE total_score <= @UPPER_BOUND
          AND total_score >= @LOWER_BOUND
 
-      IF EXISTS (SELECT * FROM decode WHERE item='NO REFRACTILE' AND code='UNIVERSE_SCORE' AND decode=@STRATEGY_ID) AND EXISTS (SELECT * FROM #SCORES)
+      IF NOT EXISTS (SELECT * FROM decode WHERE item='REFRACTILE' AND code='UNIVERSE_SCORE' AND decode=@STRATEGY_ID) AND EXISTS (SELECT * FROM #SCORES)
       BEGIN
         EXEC scores_temp_rank_update @BDATE=@REBAL_BDATE, @SCORE_TYPE='UNIVERSE_SCORE', @STRATEGY_ID=@STRATEGY_ID, @DEBUG=@DEBUG
         IF @DEBUG = 1
@@ -354,7 +356,7 @@ BEGIN
        WHERE universe_score <= @UPPER_BOUND
          AND universe_score >= @LOWER_BOUND
 
-      IF EXISTS (SELECT * FROM decode WHERE item='NO REFRACTILE' AND code='SECTOR_SCORE' AND decode=@STRATEGY_ID) AND EXISTS (SELECT * FROM #SCORES)
+      IF NOT EXISTS (SELECT * FROM decode WHERE item='REFRACTILE' AND code='SECTOR_SCORE' AND decode=@STRATEGY_ID) AND EXISTS (SELECT * FROM #SCORES)
       BEGIN
         EXEC scores_temp_rank_update @BDATE=@REBAL_BDATE, @SCORE_TYPE='SECTOR_SCORE', @STRATEGY_ID=@STRATEGY_ID, @DEBUG=@DEBUG
         IF @DEBUG = 1
@@ -416,7 +418,7 @@ BEGIN
     SELECT @ADATE = DATEADD(DD, 1, @ADATE)
   END
 
-  DROP TABLE #SS_SECURITY
+  DROP TABLE #SECURITY_CLASS
   DROP TABLE #SCORES
 END
 

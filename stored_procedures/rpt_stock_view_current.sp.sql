@@ -9,21 +9,16 @@ BEGIN
         PRINT '<<< DROPPED PROCEDURE dbo.rpt_stock_view_current >>>'
 END
 go
-CREATE PROCEDURE dbo.rpt_stock_view_current @STRATEGY_ID int,
-                                            @BDATE datetime,
-                                            @ACCOUNT_CD varchar(32),
-                                            @MODEL_WEIGHT varchar(16),
-                                            @IDENTIFIER_TYPE varchar(32),
-                                            @IDENTIFIER_VALUE varchar(64),
-                                            @DEBUG bit = NULL
+CREATE PROCEDURE dbo.rpt_stock_view_current
+@STRATEGY_ID int,
+@BDATE datetime,
+@ACCOUNT_CD varchar(32),
+@MODEL_WEIGHT varchar(16),
+@IDENTIFIER_TYPE varchar(32),
+@IDENTIFIER_VALUE varchar(64),
+@DEBUG bit = NULL
 AS
 /* STOCK - CURRENT RANKS */
-
-/****
-* KNOWN ISSUES:
-*   IN THE CASE WHEN THE ACCOUNT HOLDS A SECURITY THAT IS NOT IN THE UNIVERSE, PROCEDURE WILL NOT RETURN ANY RESULTS
-*   THIS HAPPENS IN A CASE SUCH AS TICKER 'SPY'
-****/
 
 IF @STRATEGY_ID IS NULL
   BEGIN SELECT 'ERROR: @STRATEGY_ID IS A REQUIRED PARAMETER' RETURN -1 END
@@ -324,15 +319,32 @@ SELECT 'TOTAL SCORE', NULL, total_score = s.total_score
 INSERT #SCORE
 SELECT 'UNIVERSE SCORE', w.universe_total_wgt, universe_score = s.universe_score
   FROM #RESULT r LEFT JOIN scores s ON s.security_id = r.security_id AND s.bdate = @BDATE AND s.strategy_id = @STRATEGY_ID
- INNER JOIN factor_model_weights w ON r.sector_id = w.sector_id AND ISNULL(r.segment_id, 0) = ISNULL(w.segment_id, 0)
+ INNER JOIN factor_model_weights w ON r.sector_id = w.sector_id AND (r.segment_id = w.segment_id OR (r.segment_id IS NULL AND w.segment_id IS NULL))
  INNER JOIN strategy g ON g.factor_model_id = w.factor_model_id AND g.strategy_id = @STRATEGY_ID
+ WHERE w.universe_total_wgt != 0.0
+
+INSERT #SCORE
+SELECT 'UNIVERSE SCORE', w.universe_total_wgt, universe_score = s.universe_score
+  FROM #RESULT r LEFT JOIN scores s ON s.security_id = r.security_id AND s.bdate = @BDATE AND s.strategy_id = @STRATEGY_ID
+ INNER JOIN factor_model_weights w ON r.sector_id = w.sector_id
+ INNER JOIN strategy g ON g.factor_model_id = w.factor_model_id AND g.strategy_id = @STRATEGY_ID
+ WHERE w.universe_total_wgt != 0.0
+   AND NOT EXISTS (SELECT * FROM #SCORE WHERE score_type = 'UNIVERSE SCORE')
 
 INSERT #SCORE
 SELECT 'SECTOR SCORE', w.sector_ss_wgt * w.ss_total_wgt, sector_score = s.sector_score
   FROM #RESULT r LEFT JOIN scores s ON s.security_id = r.security_id AND s.bdate = @BDATE AND s.strategy_id = @STRATEGY_ID
- INNER JOIN factor_model_weights w ON r.sector_id = w.sector_id AND ISNULL(r.segment_id, 0) = ISNULL(w.segment_id, 0)
+ INNER JOIN factor_model_weights w ON r.sector_id = w.sector_id AND (r.segment_id = w.segment_id OR (r.segment_id IS NULL AND w.segment_id IS NULL))
  INNER JOIN strategy g ON g.factor_model_id = w.factor_model_id AND g.strategy_id = @STRATEGY_ID
  WHERE w.sector_ss_wgt != 0.0
+
+INSERT #SCORE
+SELECT 'SECTOR SCORE', w.sector_ss_wgt * w.ss_total_wgt, sector_score = s.sector_score
+  FROM #RESULT r LEFT JOIN scores s ON s.security_id = r.security_id AND s.bdate = @BDATE AND s.strategy_id = @STRATEGY_ID
+ INNER JOIN factor_model_weights w ON r.sector_id = w.sector_id
+ INNER JOIN strategy g ON g.factor_model_id = w.factor_model_id AND g.strategy_id = @STRATEGY_ID
+ WHERE w.sector_ss_wgt != 0.0
+   AND NOT EXISTS (SELECT * FROM #SCORE WHERE score_type = 'SECTOR SCORE')
 
 INSERT #SCORE
 SELECT 'SEGMENT SCORE', w.segment_ss_wgt * w.ss_total_wgt, segment_score = s.segment_score
@@ -340,6 +352,21 @@ SELECT 'SEGMENT SCORE', w.segment_ss_wgt * w.ss_total_wgt, segment_score = s.seg
  INNER JOIN factor_model_weights w ON r.sector_id = w.sector_id AND r.segment_id = w.segment_id
  INNER JOIN strategy g ON g.factor_model_id = w.factor_model_id AND g.strategy_id = @STRATEGY_ID
  WHERE w.segment_ss_wgt != 0.0
+
+INSERT #SCORE
+SELECT 'COUNTRY SCORE', w.country_total_wgt, country_score = s.country_score
+  FROM #RESULT r LEFT JOIN scores s ON s.security_id = r.security_id AND s.bdate = @BDATE AND s.strategy_id = @STRATEGY_ID
+ INNER JOIN factor_model_weights w ON r.sector_id = w.sector_id AND (r.segment_id = w.segment_id OR (r.segment_id IS NULL AND w.segment_id IS NULL))
+ INNER JOIN strategy g ON g.factor_model_id = w.factor_model_id AND g.strategy_id = @STRATEGY_ID
+ WHERE w.country_total_wgt != 0.0
+
+INSERT #SCORE
+SELECT 'COUNTRY SCORE', w.country_total_wgt, country_score = s.country_score
+  FROM #RESULT r LEFT JOIN scores s ON s.security_id = r.security_id AND s.bdate = @BDATE AND s.strategy_id = @STRATEGY_ID
+ INNER JOIN factor_model_weights w ON r.sector_id = w.sector_id
+ INNER JOIN strategy g ON g.factor_model_id = w.factor_model_id AND g.strategy_id = @STRATEGY_ID
+ WHERE w.country_total_wgt != 0.0
+   AND NOT EXISTS (SELECT * FROM #SCORE WHERE score_type = 'COUNTRY SCORE')
 
 IF @DEBUG = 1
 BEGIN
@@ -399,6 +426,17 @@ BEGIN
     FROM #SCORE
    WHERE score_type = 'SEGMENT SCORE'
 END
+--5
+IF EXISTS (SELECT * FROM #SCORE WHERE score_type = 'COUNTRY SCORE' AND score_value IS NULL)
+  BEGIN SELECT 'COUNTRY SCORE' AS [Score Type], NULL AS [Score Wgt], NULL AS [Score Value] END
+ELSE
+BEGIN
+  SELECT score_type		AS [Score Type],
+         score_weight	AS [Score Wgt],
+         ROUND(score_value,1)	AS [Score Value]
+    FROM #SCORE
+   WHERE score_type = 'COUNTRY SCORE'
+END
 
 CREATE TABLE #FACTOR_RANK (
   rank_event_id		int			NULL,
@@ -448,6 +486,17 @@ SELECT w.against, c.category, f.factor_id, f.factor_cd, f.factor_short_nm, f.fac
    AND c.factor_id = f.factor_id
    AND w.against = 'G'
    AND w.against_id = r.segment_id
+
+INSERT #FACTOR_RANK
+      (against, category, factor_id, factor_cd, factor_short_nm, factor_nm, weight)
+SELECT w.against, c.category, f.factor_id, f.factor_cd, f.factor_short_nm, f.factor_nm, w.weight
+  FROM #RESULT r, factor_against_weight w, factor_category c, factor f, strategy g
+ WHERE g.strategy_id = @STRATEGY_ID
+   AND g.factor_model_id = w.factor_model_id
+   AND w.factor_model_id = c.factor_model_id
+   AND w.factor_id = c.factor_id
+   AND c.factor_id = f.factor_id
+   AND w.against = 'Y'
 
 IF @DEBUG = 1
 BEGIN
@@ -550,6 +599,9 @@ UPDATE #FACTOR_RANK
    AND #FACTOR_RANK.against = 'G'
    AND (r.segment_id = o.against_id OR (r.segment_id IS NULL AND o.against_id IS NULL))
    AND o.level_type = 'U'
+/*
+NOTE: CURRENTLY NO CODE TO OVERRIDE COUNTRY WEIGHTS;
+      REQUIRES ADDING COLUMN level_cd TO factor_against_weight_override */
 --OVERRIDE WEIGHT LOGIC: END
 
 IF @DEBUG = 1
@@ -591,6 +643,17 @@ UPDATE #FACTOR_RANK
    AND i.against = #FACTOR_RANK.against
    AND #FACTOR_RANK.against = 'G'
    AND i.against_id = r.segment_id
+
+UPDATE #FACTOR_RANK
+   SET rank_event_id = i.rank_event_id
+  FROM rank_inputs i, strategy g
+ WHERE i.bdate = @BDATE
+   AND g.strategy_id = @STRATEGY_ID
+   AND i.universe_id = g.universe_id
+   AND i.factor_id = #FACTOR_RANK.factor_id
+   AND i.against = #FACTOR_RANK.against
+   AND #FACTOR_RANK.against = 'Y'
+   AND i.against_cd IN (SELECT country_cd FROM #RESULT)
 
 UPDATE #FACTOR_RANK
    SET rank = o.rank
@@ -644,6 +707,7 @@ CREATE TABLE #SCORE_LEVEL (
 INSERT #SCORE_LEVEL (score_lvl_cd, score_lvl_nm) SELECT code, decode FROM decode WHERE item = 'SCORE_LEVEL' AND code = 'U'
 INSERT #SCORE_LEVEL (score_lvl_cd, score_lvl_nm) SELECT code, decode FROM decode WHERE item = 'SCORE_LEVEL' AND code = 'C'
 INSERT #SCORE_LEVEL (score_lvl_cd, score_lvl_nm) SELECT code, decode FROM decode WHERE item = 'SCORE_LEVEL' AND code = 'G'
+INSERT #SCORE_LEVEL (score_lvl_cd, score_lvl_nm) SELECT code, decode FROM decode WHERE item = 'SCORE_LEVEL' AND code = 'Y'
 
 IF @DEBUG = 1
 BEGIN
@@ -668,7 +732,7 @@ BEGIN
    WHERE c.bdate = @BDATE
      AND c.strategy_id = @STRATEGY_ID
      AND c.security_id = r.security_id
-     AND c.score_level IN ('U', 'C', 'G')
+     AND c.score_level IN ('U', 'C', 'G', 'Y')
      AND d.item = 'FACTOR_CATEGORY'
      AND c.category = d.code
 
@@ -678,10 +742,10 @@ BEGIN
    WHERE c.bdate = @BDATE
      AND c.strategy_id = @STRATEGY_ID
      AND c.security_id = r.security_id
-     AND c.score_level IN ('U', 'C', 'G')
+     AND c.score_level IN ('U', 'C', 'G', 'Y')
      AND #CATEGORY_TEMP.category_cd = c.category
      AND #CATEGORY_TEMP.score_lvl_cd = c.score_level
-  --4.5
+  --5.5
   SELECT category_nm AS [category],
          score_lvl_nm AS [score_level],
          category_score
@@ -692,7 +756,7 @@ BEGIN
 END
 ELSE
 BEGIN
-  --4.5
+  --5.5
   SELECT c.category_nm AS [category],
          l.score_lvl_nm AS [score_level],
          NULL AS [category_score]
@@ -727,6 +791,12 @@ BEGIN
 
   SELECT @SQL = 'SELECT fr.factor_short_nm AS [Factor], fr.factor_nm AS [Factor Name], fr.weight AS [Weight], ISNULL(fr.rank, 0) AS [Rank] '
   SELECT @SQL = @SQL + 'FROM #FACTOR_RANK fr, decode d  WHERE fr.against = ''G'' AND d.item = ''FACTOR_CATEGORY'' AND fr.category = d.code '
+  SELECT @SQL = @SQL + 'AND d.code = ''' + @CATEGORY + ''' ORDER BY fr.against, d.decode, fr.factor_nm'
+  IF @DEBUG=1 BEGIN SELECT '@SQL', @SQL END
+  EXEC(@SQL)
+
+  SELECT @SQL = 'SELECT fr.factor_short_nm AS [Factor], fr.factor_nm AS [Factor Name], fr.weight AS [Weight], ISNULL(fr.rank, 0) AS [Rank] '
+  SELECT @SQL = @SQL + 'FROM #FACTOR_RANK fr, decode d  WHERE fr.against = ''Y'' AND d.item = ''FACTOR_CATEGORY'' AND fr.category = d.code '
   SELECT @SQL = @SQL + 'AND d.code = ''' + @CATEGORY + ''' ORDER BY fr.against, d.decode, fr.factor_nm'
   IF @DEBUG=1 BEGIN SELECT '@SQL', @SQL END
   EXEC(@SQL)

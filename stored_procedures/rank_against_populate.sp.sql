@@ -20,20 +20,23 @@ BEGIN
         PRINT '<<< DROPPED PROCEDURE dbo.rank_against_populate >>>'
 END
 go
-CREATE PROCEDURE dbo.rank_against_populate @RANK_EVENT_ID int,
-                                           @DEBUG bit = NULL
+CREATE PROCEDURE dbo.rank_against_populate
+@RANK_EVENT_ID int,
+@DEBUG bit = NULL
 AS
 
 DECLARE @BDATE datetime,
         @UNIVERSE_DT datetime,
         @UNIVERSE_ID int,
         @AGAINST varchar(1),
+        @AGAINST_CD varchar(8),
         @AGAINST_ID int,
         @SECTOR_MODEL_ID int
 
 SELECT @BDATE = bdate,
        @UNIVERSE_ID = universe_id,
        @AGAINST = against,
+       @AGAINST_CD = against_cd,
        @AGAINST_ID = against_id
   FROM rank_inputs
  WHERE rank_event_id = @RANK_EVENT_ID
@@ -47,6 +50,7 @@ BEGIN
   SELECT '@UNIVERSE_DT', @UNIVERSE_DT
   SELECT '@UNIVERSE_ID', @UNIVERSE_ID
   SELECT '@AGAINST', @AGAINST
+  SELECT '@AGAINST_CD', @AGAINST_CD
   SELECT '@AGAINST_ID', @AGAINST_ID
 END
 
@@ -107,13 +111,23 @@ BEGIN
        AND ss.security_id = p.security_id
   END
 END
-IF @AGAINST = 'U'
+ELSE IF @AGAINST = 'Y'
+BEGIN
+  INSERT #DATA_SET (security_id)
+  SELECT p.security_id
+    FROM universe_makeup p, equity_common..security y
+   WHERE p.universe_dt = @UNIVERSE_DT
+     AND p.universe_id = @UNIVERSE_ID
+     AND p.security_id = y.security_id
+     AND y.issue_country_cd = @AGAINST_CD
+END
+ELSE IF @AGAINST = 'U'
 BEGIN
   INSERT #DATA_SET (security_id)
   SELECT security_id
     FROM universe_makeup
-   WHERE universe_id = @UNIVERSE_ID
-     AND universe_dt = @UNIVERSE_DT
+   WHERE universe_dt = @UNIVERSE_DT
+     AND universe_id = @UNIVERSE_ID
 END
 
 IF @DEBUG = 1
