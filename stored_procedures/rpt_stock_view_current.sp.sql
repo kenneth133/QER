@@ -813,19 +813,19 @@ BEGIN
     FROM #FACTOR_CATEGORY
    WHERE ordinal = @NUM
 
-  SELECT @SQL = 'SELECT fr.factor_short_nm AS [Factor], fr.weight AS [Weight], ISNULL(fr.rank, 0) AS [Rank] '
+  SELECT @SQL = 'SELECT fr.factor_short_nm AS [Factor], fr.factor_nm AS [Factor Name], fr.weight AS [Weight], ISNULL(fr.rank, 0) AS [Rank] '
   SELECT @SQL = @SQL + 'FROM #FACTOR_RANK fr, decode d  WHERE fr.against = ''U'' AND d.item = ''FACTOR_CATEGORY'' AND fr.category = d.code '
   SELECT @SQL = @SQL + 'AND d.code = ''' + @CATEGORY + ''' ORDER BY fr.against, d.decode, fr.factor_nm'
   IF @DEBUG=1 BEGIN SELECT '@SQL', @SQL END
   EXEC(@SQL)
 
-  SELECT @SQL = 'SELECT fr.factor_short_nm AS [Factor], fr.weight AS [Weight], ISNULL(fr.rank, 0) AS [Rank] '
+  SELECT @SQL = 'SELECT fr.factor_short_nm AS [Factor], fr.factor_nm AS [Factor Name], fr.weight AS [Weight], ISNULL(fr.rank, 0) AS [Rank] '
   SELECT @SQL = @SQL + 'FROM #FACTOR_RANK fr, decode d  WHERE fr.against = ''C'' AND d.item = ''FACTOR_CATEGORY'' AND fr.category = d.code '
   SELECT @SQL = @SQL + 'AND d.code = ''' + @CATEGORY + ''' ORDER BY fr.against, d.decode, fr.factor_nm'
   IF @DEBUG=1 BEGIN SELECT '@SQL', @SQL END
   EXEC(@SQL)
 
-  SELECT @SQL = 'SELECT fr.factor_short_nm AS [Factor], fr.weight AS [Weight], ISNULL(fr.rank, 0) AS [Rank] '
+  SELECT @SQL = 'SELECT fr.factor_short_nm AS [Factor], fr.factor_nm AS [Factor Name], fr.weight AS [Weight], ISNULL(fr.rank, 0) AS [Rank] '
   SELECT @SQL = @SQL + 'FROM #FACTOR_RANK fr, decode d  WHERE fr.against = ''G'' AND d.item = ''FACTOR_CATEGORY'' AND fr.category = d.code '
   SELECT @SQL = @SQL + 'AND d.code = ''' + @CATEGORY + ''' ORDER BY fr.against, d.decode, fr.factor_nm'
   IF @DEBUG=1 BEGIN SELECT '@SQL', @SQL END

@@ -1072,19 +1072,6 @@ BEGIN
 END
 
 IF @RETURN_TYPE = 'ACCT'
-  BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NOT NULL AND begin_bdate >= (SELECT MIN(bdate) FROM position WHERE account_cd = '''+@ACCOUNT_CD+''') ORDER BY ordinal' END
-ELSE IF @RETURN_TYPE = 'BMK'
-  BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NOT NULL AND begin_bdate >= (SELECT MIN(universe_dt) FROM universe_makeup WHERE universe_id = '+CONVERT(varchar,@BM_UNIVERSE_ID)+') ORDER BY ordinal' END
-ELSE IF @RETURN_TYPE = 'MODEL'
-  BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NOT NULL AND begin_bdate >= (SELECT MIN(bdate) FROM scores WHERE strategy_id = '+CONVERT(varchar,@STRATEGY_ID)+') ORDER BY ordinal' END
-ELSE IF @RETURN_TYPE = 'ACCT-BMK'
-  BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NOT NULL AND begin_bdate >= (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM position WHERE account_cd = '''+@ACCOUNT_CD+''' UNION SELECT MIN(universe_dt) AS [bdate] FROM universe_makeup WHERE universe_id = '+CONVERT(varchar,@BM_UNIVERSE_ID)+') x) ORDER BY ordinal' END
-ELSE IF @RETURN_TYPE = 'MODEL-BMK'
-  BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NOT NULL AND begin_bdate >= (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM scores WHERE strategy_id = '+CONVERT(varchar,@STRATEGY_ID)+' UNION SELECT MIN(universe_dt) AS [bdate] FROM universe_makeup WHERE universe_id = '+CONVERT(varchar,@BM_UNIVERSE_ID)+') x) ORDER BY ordinal' END
-ELSE IF @RETURN_TYPE = 'ACCT-MODEL'
-  BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NOT NULL AND begin_bdate >= (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM position WHERE account_cd = '''+@ACCOUNT_CD+''' UNION SELECT MIN(bdate) AS [bdate] FROM scores WHERE strategy_id = '+CONVERT(varchar,@STRATEGY_ID)+') x) ORDER BY ordinal' END
-/*
-IF @RETURN_TYPE = 'ACCT'
   BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NOT NULL AND begin_bdate > (SELECT MIN(bdate) FROM position WHERE account_cd = '''+@ACCOUNT_CD+''') ORDER BY ordinal' END
 ELSE IF @RETURN_TYPE = 'BMK'
   BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NOT NULL AND begin_bdate > (SELECT MIN(universe_dt) FROM universe_makeup WHERE universe_id = '+CONVERT(varchar,@BM_UNIVERSE_ID)+') ORDER BY ordinal' END
@@ -1096,7 +1083,7 @@ ELSE IF @RETURN_TYPE = 'MODEL-BMK'
   BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NOT NULL AND begin_bdate > (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM scores WHERE strategy_id = '+CONVERT(varchar,@STRATEGY_ID)+' UNION SELECT MIN(universe_dt) AS [bdate] FROM universe_makeup WHERE universe_id = '+CONVERT(varchar,@BM_UNIVERSE_ID)+') x) ORDER BY ordinal' END
 ELSE IF @RETURN_TYPE = 'ACCT-MODEL'
   BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NOT NULL AND begin_bdate > (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM position WHERE account_cd = '''+@ACCOUNT_CD+''' UNION SELECT MIN(bdate) AS [bdate] FROM scores WHERE strategy_id = '+CONVERT(varchar,@STRATEGY_ID)+') x) ORDER BY ordinal' END
-*/
+
 IF @DEBUG = 1
   BEGIN SELECT '@SQL', @SQL END
 
@@ -1117,19 +1104,6 @@ BEGIN
 END
 
 IF @RETURN_TYPE = 'ACCT'
-  BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NULL AND begin_bdate >= ''20070101'' AND begin_bdate >= (SELECT MIN(bdate) FROM position WHERE account_cd = '''+@ACCOUNT_CD+''') ORDER BY end_bdate DESC' END
-ELSE IF @RETURN_TYPE = 'BMK'
-  BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NULL AND begin_bdate >= ''20070101'' AND begin_bdate >= (SELECT MIN(universe_dt) FROM universe_makeup WHERE universe_id = '+CONVERT(varchar,@BM_UNIVERSE_ID)+') ORDER BY end_bdate DESC' END
-ELSE IF @RETURN_TYPE = 'MODEL'
-  BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NULL AND begin_bdate >= ''20070101'' AND begin_bdate >= (SELECT MIN(bdate) FROM scores WHERE strategy_id = '+CONVERT(varchar,@STRATEGY_ID)+') ORDER BY end_bdate DESC' END
-ELSE IF @RETURN_TYPE = 'ACCT-BMK'
-  BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NULL AND begin_bdate >= ''20070101'' AND begin_bdate >= (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM position WHERE account_cd = '''+@ACCOUNT_CD+''' UNION SELECT MIN(universe_dt) AS [bdate] FROM universe_makeup WHERE universe_id = '+CONVERT(varchar,@BM_UNIVERSE_ID)+') x) ORDER BY end_bdate DESC' END
-ELSE IF @RETURN_TYPE = 'MODEL-BMK'
-  BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NULL AND begin_bdate >= ''20070101'' AND begin_bdate >= (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM scores WHERE strategy_id = '+CONVERT(varchar,@STRATEGY_ID)+' UNION SELECT MIN(universe_dt) AS [bdate] FROM universe_makeup WHERE universe_id = '+CONVERT(varchar,@BM_UNIVERSE_ID)+') x) ORDER BY end_bdate DESC' END
-ELSE IF @RETURN_TYPE = 'ACCT-MODEL'
-  BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NULL AND begin_bdate >= ''20070101'' AND begin_bdate >= (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM position WHERE account_cd = '''+@ACCOUNT_CD+''' UNION SELECT MIN(bdate) AS [bdate] FROM scores WHERE strategy_id = '+CONVERT(varchar,@STRATEGY_ID)+') x) ORDER BY end_bdate DESC' END
-/*
-IF @RETURN_TYPE = 'ACCT'
   BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NULL AND begin_bdate >= ''20070101'' AND begin_bdate > (SELECT MIN(bdate) FROM position WHERE account_cd = '''+@ACCOUNT_CD+''') ORDER BY end_bdate DESC' END
 ELSE IF @RETURN_TYPE = 'BMK'
   BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NULL AND begin_bdate >= ''20070101'' AND begin_bdate > (SELECT MIN(universe_dt) FROM universe_makeup WHERE universe_id = '+CONVERT(varchar,@BM_UNIVERSE_ID)+') ORDER BY end_bdate DESC' END
@@ -1141,7 +1115,7 @@ ELSE IF @RETURN_TYPE = 'MODEL-BMK'
   BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NULL AND begin_bdate >= ''20070101'' AND begin_bdate > (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM scores WHERE strategy_id = '+CONVERT(varchar,@STRATEGY_ID)+' UNION SELECT MIN(universe_dt) AS [bdate] FROM universe_makeup WHERE universe_id = '+CONVERT(varchar,@BM_UNIVERSE_ID)+') x) ORDER BY end_bdate DESC' END
 ELSE IF @RETURN_TYPE = 'ACCT-MODEL'
   BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NULL AND begin_bdate >= ''20070101'' AND begin_bdate > (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM position WHERE account_cd = '''+@ACCOUNT_CD+''' UNION SELECT MIN(bdate) AS [bdate] FROM scores WHERE strategy_id = '+CONVERT(varchar,@STRATEGY_ID)+') x) ORDER BY end_bdate DESC' END
-*/
+
 IF @DEBUG = 1
   BEGIN SELECT '@SQL', @SQL END
 

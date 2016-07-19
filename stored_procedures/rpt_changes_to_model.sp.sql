@@ -866,6 +866,7 @@ BEGIN
            r2.sedol	AS [SEDOL],
            r2.isin	AS [ISIN],
            r2.factor_short_nm AS [Factor],
+           r2.factor_nm AS [Factor Name],
            CASE r2.against WHEN 'U' THEN 'UNIVERSE'
                            WHEN 'C' THEN 'SECTOR'
                            WHEN 'G' THEN 'SEGMENT' END AS [Relative To],
@@ -884,6 +885,7 @@ BEGIN
            r2.sedol	AS [SEDOL],
            r2.isin	AS [ISIN],
            r2.factor_short_nm AS [Factor],
+           r2.factor_nm AS [Factor Name],
            CASE r2.against WHEN 'U' THEN 'UNIVERSE'
                            WHEN 'C' THEN 'SECTOR'
                            WHEN 'G' THEN 'SEGMENT' END AS [Relative To],
