@@ -1,6 +1,10 @@
 use QER
 go
 
+IF OBJECT_ID('dbo.instrument_factor_staging') IS NOT NULL
+  BEGIN drop table dbo.instrument_factor_staging END
+go
+
 create table dbo.instrument_factor_staging (
   bdate			datetime	null,
 
@@ -9,10 +13,11 @@ create table dbo.instrument_factor_staging (
   cusip			varchar(32)	null,
   sedol			varchar(32)	null,
   isin			varchar(64)	null,
-  gv_key		int		null,
+  currency_cd	varchar(3)	null,
+  exchange_nm	varchar(40)	null,
 
   factor_cd		varchar(64)	null,
-  factor_value		float		null
+  factor_value	float		null
 )
 go
 

@@ -10,9 +10,8 @@ create table dbo.return_calc_params (
   weight		varchar(16)	not null,
 
   account_cd		varchar(32)	null,
-  bm_universe_id	int		null,
-  model_def_cd 		varchar(32)	null,
-
+  benchmark_cd		varchar(50)	null,
+  model_def_cd		varchar(32)	null,
   run_tm		datetime	not null
 )
 go
