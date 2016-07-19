@@ -10,12 +10,16 @@ BEGIN
 END
 go
 CREATE PROCEDURE dbo.gics_model_maint
+@BDATE datetime
 AS
 
-EXEC gics_sector_get
-EXEC gics_segment_get
-EXEC gics_industry_get
-EXEC gics_sub_industry_get
+IF @BDATE IS NULL
+  BEGIN SELECT 'ERROR: @BDATE IS A REQUIRED PARAMETER' RETURN -1 END
+
+EXEC gics_sector_get @BDATE
+EXEC gics_segment_get @BDATE
+EXEC gics_industry_get @BDATE
+EXEC gics_sub_industry_get @BDATE
 
 CREATE TABLE #GICS_SEGMENT_INDUSTRY (
   segment_id		int	NULL,
@@ -25,14 +29,26 @@ CREATE TABLE #GICS_SEGMENT_INDUSTRY (
 )
 
 INSERT #GICS_SEGMENT_INDUSTRY (gics_segment_num, gics_industry_num)
-SELECT DISTINCT gics_segment_num, gics_industry_num
-  FROM QER..instrument_characteristics_staging
- WHERE gics_segment_num IS NOT NULL
-   AND gics_industry_num IS NOT NULL
+SELECT DISTINCT y.gics_industry_group_num, y.gics_industry_num
+  FROM equity_common..security y,
+      (SELECT security_id FROM universe_makeup WHERE universe_dt = @BDATE
+       UNION
+       SELECT security_id FROM equity_common..position
+        WHERE reference_date = @BDATE
+          AND reference_date = effective_date
+          AND acct_cd IN (SELECT DISTINCT a.acct_cd
+                            FROM equity_common..account a,
+                                (SELECT account_cd AS [account_cd] FROM account
+                                 UNION
+                                 SELECT benchmark_cd AS [account_cd] FROM benchmark) q
+                           WHERE a.parent = q.account_cd OR a.acct_cd = q.account_cd)) x
+ WHERE y.security_id = x.security_id
+   AND y.gics_industry_group_num IS NOT NULL
+   AND y.gics_industry_num IS NOT NULL
 
 UPDATE #GICS_SEGMENT_INDUSTRY
    SET segment_id = g.segment_id
-  FROM QER..sector_model m, QER..sector_def c, QER..segment_def g
+  FROM sector_model m, sector_def c, segment_def g
  WHERE m.sector_model_cd = 'GICS-S'
    AND m.sector_model_id = c.sector_model_id
    AND c.sector_id = g.sector_id
@@ -40,18 +56,18 @@ UPDATE #GICS_SEGMENT_INDUSTRY
 
 UPDATE #GICS_SEGMENT_INDUSTRY
    SET industry_id = i.industry_id
-  FROM QER..industry_model m, QER..industry i
+  FROM industry_model m, industry i
  WHERE m.industry_model_cd = 'GICS-I'
    AND m.industry_model_id = i.industry_model_id
    AND i.industry_num = #GICS_SEGMENT_INDUSTRY.gics_industry_num
 
 DELETE #GICS_SEGMENT_INDUSTRY
-  FROM QER..segment_makeup p
+  FROM segment_makeup p
  WHERE #GICS_SEGMENT_INDUSTRY.segment_id = p.segment_id
    AND p.segment_child_type = 'I'
    AND #GICS_SEGMENT_INDUSTRY.industry_id = p.segment_child_id
 
-INSERT QER..segment_makeup
+INSERT segment_makeup
 SELECT segment_id, 'I', industry_id
   FROM #GICS_SEGMENT_INDUSTRY
 

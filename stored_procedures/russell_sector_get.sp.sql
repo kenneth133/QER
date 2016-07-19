@@ -10,44 +10,60 @@ BEGIN
 END
 go
 CREATE PROCEDURE dbo.russell_sector_get
+@BDATE datetime
 AS
 
+IF @BDATE IS NULL
+  BEGIN SELECT 'ERROR: @BDATE IS A REQUIRED PARAMETER' RETURN -1 END
+
 CREATE TABLE #RUSSELL_SECTOR (
-  sector_id		int		NULL,
-  russell_sector_num	int		NULL,
-  russell_sector_nm	varchar(64)	NULL
+  sector_id				int			NULL,
+  russell_sector_num	int			NULL,
+  russell_sector_nm		varchar(64)	NULL
 )
 
 INSERT #RUSSELL_SECTOR
-SELECT DISTINCT NULL, russell_sector_num, upper(russell_sector_nm)
-  FROM QER..instrument_characteristics_staging
- WHERE russell_sector_num IS NOT NULL
-   AND russell_sector_nm IS NOT NULL
+SELECT DISTINCT NULL, y.russell_sector_num, UPPER(y.russell_sector_name)
+  FROM equity_common..security y,
+      (SELECT security_id FROM universe_makeup WHERE universe_dt = @BDATE
+       UNION
+       SELECT security_id FROM equity_common..position
+        WHERE reference_date = @BDATE
+          AND reference_date = effective_date
+          AND acct_cd IN (SELECT DISTINCT a.acct_cd
+                            FROM equity_common..account a,
+                                (SELECT account_cd AS [account_cd] FROM account
+                                 UNION
+                                 SELECT benchmark_cd AS [account_cd] FROM benchmark) q
+                           WHERE a.parent = q.account_cd OR a.acct_cd = q.account_cd)) x
+ WHERE y.security_id = x.security_id
+   AND y.russell_sector_num IS NOT NULL
+   AND y.russell_sector_name IS NOT NULL
 
 UPDATE #RUSSELL_SECTOR
    SET sector_id = d.sector_id
-  FROM QER..sector_model m, QER..sector_def d
+  FROM sector_model m, sector_def d
  WHERE m.sector_model_cd = 'RUSSELL-S'
    AND m.sector_model_id = d.sector_model_id
    AND d.sector_num = #RUSSELL_SECTOR.russell_sector_num
 
 DELETE #RUSSELL_SECTOR
-  FROM QER..sector_def d
+  FROM sector_def d
  WHERE d.sector_id = #RUSSELL_SECTOR.sector_id
    AND d.sector_nm IS NOT NULL
 
-UPDATE QER..sector_def
+UPDATE sector_def
    SET sector_nm = r.russell_sector_nm
   FROM #RUSSELL_SECTOR r
- WHERE QER..sector_def.sector_id = r.sector_id
-   AND QER..sector_def.sector_nm IS NULL
+ WHERE sector_def.sector_id = r.sector_id
+   AND sector_def.sector_nm IS NULL
 
 DELETE #RUSSELL_SECTOR
  WHERE sector_id IS NOT NULL
 
-INSERT QER..sector_def (sector_model_id, sector_num, sector_nm)
+INSERT sector_def (sector_model_id, sector_num, sector_nm)
 SELECT m.sector_model_id, r.russell_sector_num, r.russell_sector_nm
-  FROM QER..sector_model m, #RUSSELL_SECTOR r
+  FROM sector_model m, #RUSSELL_SECTOR r
  WHERE m.sector_model_cd = 'RUSSELL-S'
 
 DROP TABLE #RUSSELL_SECTOR

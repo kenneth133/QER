@@ -9,112 +9,49 @@ BEGIN
         PRINT '<<< DROPPED PROCEDURE dbo.scores_load >>>'
 END
 go
-CREATE PROCEDURE dbo.scores_load @MODE varchar(16) = 'RELOAD',
-                                 @IDENTIFIER varchar(16) = 'CUSIP'
+CREATE PROCEDURE dbo.scores_load
 AS
 
-SELECT @MODE = UPPER(@MODE)
-SELECT @IDENTIFIER = UPPER(@IDENTIFIER)
+CREATE TABLE #SCORES_STAGING (
+  bdate				datetime	NULL,
+  strategy_cd		varchar(16)	NULL,
+  security_id		int			NULL,
+  ticker			varchar(16)	NULL,
+  cusip				varchar(32)	NULL,
+  sedol				varchar(32)	NULL,
+  isin				varchar(64)	NULL,
+  currency_cd		varchar(3)	NULL,
+  exchange_nm		varchar(40)	NULL,
+  sector_score		float		NULL,
+  segment_score		float		NULL,
+  ss_score			float		NULL,
+  universe_score	float		NULL,
+  country_score		float		NULL,
+  total_score		float		NULL
+)
 
-IF @MODE NOT IN ('APPEND', 'OVERWRITE', 'RELOAD')
-  BEGIN SELECT 'ERROR: INVALID VALUE PASSED FOR @MODE PARAMETER' RETURN -1 END
-IF @MODE IN ('APPEND', 'OVERWRITE') AND @IDENTIFIER NOT IN ('TICKER', 'CUSIP', 'SEDOL', 'ISIN')
-  BEGIN SELECT 'ERROR: INVALID VALUE PASSED FOR @IDENTIFIER PARAMETER' RETURN -1 END
+INSERT #SCORES_STAGING
+SELECT bdate, strategy_cd, NULL, ticker, cusip, sedol, isin, currency_cd, exchange_nm,
+       sector_score, segment_score, ss_score, universe_score, country_score, total_score
+  FROM scores_staging
 
-IF @MODE = 'RELOAD'
-BEGIN
-  DELETE scores
-    FROM strategy g, scores_staging s
-   WHERE s.strategy_cd = g.strategy_cd
-     AND scores.strategy_id = g.strategy_id
-     AND scores.bdate = s.bdate
-END
-ELSE IF @MODE = 'OVERWRITE'
-BEGIN
-  IF @IDENTIFIER = 'TICKER'
-  BEGIN
-    DELETE scores
-      FROM strategy g, scores_staging s
-     WHERE s.strategy_cd = g.strategy_cd
-       AND scores.strategy_id = g.strategy_id
-       AND scores.bdate = s.bdate
-       AND scores.ticker = s.ticker
-  END
-  ELSE IF @IDENTIFIER = 'CUSIP'
-  BEGIN
-    DELETE scores
-      FROM strategy g, scores_staging s
-     WHERE s.strategy_cd = g.strategy_cd
-       AND scores.strategy_id = g.strategy_id
-       AND scores.bdate = s.bdate
-       AND scores.cusip = s.cusip
-  END
-  ELSE IF @IDENTIFIER = 'SEDOL'
-  BEGIN
-    DELETE scores
-      FROM strategy g, scores_staging s
-     WHERE s.strategy_cd = g.strategy_cd
-       AND scores.strategy_id = g.strategy_id
-       AND scores.bdate = s.bdate
-       AND scores.sedol = s.sedol
-  END
-  ELSE IF @IDENTIFIER = 'ISIN'
-  BEGIN
-    DELETE scores
-      FROM strategy g, scores_staging s
-     WHERE s.strategy_cd = g.strategy_cd
-       AND scores.strategy_id = g.strategy_id
-       AND scores.bdate = s.bdate
-       AND scores.isin = s.isin
-  END
-END
-ELSE IF @MODE = 'APPEND'
-BEGIN
-  IF @IDENTIFIER = 'TICKER'
-  BEGIN
-    DELETE scores_staging
-      FROM strategy g, scores s
-     WHERE s.strategy_id = g.strategy_id
-       AND scores_staging.strategy_cd = g.strategy_cd
-       AND scores_staging.bdate = s.bdate
-       AND scores_staging.ticker = s.ticker
-  END
-  ELSE IF @IDENTIFIER = 'CUSIP'
-  BEGIN
-    DELETE scores_staging
-      FROM strategy g, scores s
-     WHERE s.strategy_id = g.strategy_id
-       AND scores_staging.strategy_cd = g.strategy_cd
-       AND scores_staging.bdate = s.bdate
-       AND scores_staging.cusip = s.cusip
-  END
-  ELSE IF @IDENTIFIER = 'SEDOL'
-  BEGIN
-    DELETE scores_staging
-      FROM strategy g, scores s
-     WHERE s.strategy_id = g.strategy_id
-       AND scores_staging.strategy_cd = g.strategy_cd
-       AND scores_staging.bdate = s.bdate
-       AND scores_staging.sedol = s.sedol
-  END
-  ELSE IF @IDENTIFIER = 'ISIN'
-  BEGIN
-    DELETE scores_staging
-      FROM strategy g, scores s
-     WHERE s.strategy_id = g.strategy_id
-       AND scores_staging.strategy_cd = g.strategy_cd
-       AND scores_staging.bdate = s.bdate
-       AND scores_staging.isin = s.isin
-  END
-END
+EXEC security_id_update @TABLE_NAME='#SCORES_STAGING'
 
-INSERT scores
-      (bdate, strategy_id, mqa_id, ticker, cusip, sedol, isin, gv_key,
+DELETE scores
+  FROM (SELECT DISTINCT s.bdate, g.strategy_id
+          FROM strategy g, #SCORES_STAGING s
+         WHERE g.strategy_cd = s.strategy_cd) x
+ WHERE scores.bdate = x.bdate
+   AND scores.strategy_id = x.strategy_id
+
+INSERT scores (bdate, strategy_id, security_id,
        sector_score, segment_score, ss_score, universe_score, country_score, total_score)
-SELECT s.bdate, g.strategy_id, s.mqa_id, s.ticker, s.cusip, s.sedol, s.isin, s.gv_key,
+SELECT s.bdate, g.strategy_id, s.security_id,
        s.sector_score, s.segment_score, s.ss_score, s.universe_score, s.country_score, s.total_score
-  FROM strategy g, scores_staging s
+  FROM strategy g, #SCORES_STAGING s
  WHERE g.strategy_cd = s.strategy_cd
+
+DROP TABLE #SCORES_STAGING
 
 RETURN 0
 go

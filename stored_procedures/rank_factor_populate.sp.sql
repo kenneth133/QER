@@ -2,18 +2,13 @@ use QER
 go
 
 CREATE TABLE #DATA_SET (
-  mqa_id	varchar(32)		NULL,
-  ticker	varchar(16)		NULL,
-  cusip		varchar(32)		NULL,
-  sedol		varchar(32)		NULL,
-  isin		varchar(64)		NULL,
-  gv_key	int			NULL,
-  mkt_cap	float			NULL,
-  factor_value	float			NULL,
-  ordinal	int identity(1,1)	NOT NULL,
+  security_id int		NULL,
+  mkt_cap	float		NULL,
+  factor_value float	NULL,
+  ordinal	int identity(1,1) NOT NULL,
   rank		int			NULL,
-  eq_return	float			NULL,
-  cap_return	float			NULL
+  eq_return	float		NULL,
+  cap_return float		NULL
 )
 
 IF OBJECT_ID('dbo.rank_factor_populate') IS NOT NULL
@@ -46,7 +41,7 @@ SELECT @BDATE = bdate,
        @PERIOD_TYPE = period_type,
        @MISSING_METHOD = missing_method,
        @MISSING_VALUE = missing_value
-  FROM QER..rank_inputs
+  FROM rank_inputs
  WHERE rank_event_id = @RANK_EVENT_ID
 
 IF @RANK_WGT_ID IS NOT NULL --SMOOTH RANK
@@ -65,46 +60,46 @@ BEGIN
   BEGIN
     INSERT #PRIOR_BDATES
     SELECT period_back, period_wgt, dateadd(yy, -period_back, @BDATE), NULL
-      FROM QER..rank_weight
+      FROM rank_weight
      WHERE rank_wgt_id = @RANK_WGT_ID
   END
   ELSE IF @PERIOD_TYPE IN ('QQ','Q')
   BEGIN
     INSERT #PRIOR_BDATES
     SELECT period_back, period_wgt, dateadd(qq, -period_back, @BDATE), NULL
-      FROM QER..rank_weight
+      FROM rank_weight
      WHERE rank_wgt_id = @RANK_WGT_ID
   END
   ELSE IF @PERIOD_TYPE IN ('MM','M')
   BEGIN
     INSERT #PRIOR_BDATES
     SELECT period_back, period_wgt, dateadd(mm, -period_back, @BDATE), NULL
-      FROM QER..rank_weight
+      FROM rank_weight
      WHERE rank_wgt_id = @RANK_WGT_ID
   END
   ELSE IF @PERIOD_TYPE IN ('WK','WW')
   BEGIN
     INSERT #PRIOR_BDATES
     SELECT period_back, period_wgt, dateadd(wk, -period_back, @BDATE), NULL
-      FROM QER..rank_weight
+      FROM rank_weight
      WHERE rank_wgt_id = @RANK_WGT_ID
   END
   ELSE IF @PERIOD_TYPE IN ('DD','D')
   BEGIN
     INSERT #PRIOR_BDATES
     SELECT period_back, period_wgt, dateadd(dd, -period_back, @BDATE), NULL
-      FROM QER..rank_weight
+      FROM rank_weight
      WHERE rank_wgt_id = @RANK_WGT_ID
   END
 
   UPDATE #PRIOR_BDATES
      SET bdate = adate
-    FROM QER..instrument_factor i
+    FROM instrument_factor i
    WHERE i.bdate = #PRIOR_BDATES.adate
      AND i.factor_id = @FACTOR_ID
      AND i.update_tm <= @AS_OF_DATE
      AND (@FACTOR_SOURCE_CD IS NULL OR i.source_cd = @FACTOR_SOURCE_CD)
-     AND i.cusip IN (SELECT cusip FROM #DATA_SET)
+     AND i.security_id IN (SELECT security_id FROM #DATA_SET)
 
   WHILE EXISTS (SELECT * FROM #PRIOR_BDATES WHERE bdate IS NULL)
   BEGIN
@@ -112,12 +107,12 @@ BEGIN
       FROM #PRIOR_BDATES
      WHERE bdate IS NULL
 
-    WHILE NOT EXISTS (SELECT * FROM QER..instrument_factor
+    WHILE NOT EXISTS (SELECT * FROM instrument_factor
                        WHERE bdate = @ADATE
                          AND factor_id = @FACTOR_ID
                          AND update_tm <= @AS_OF_DATE
                          AND (@FACTOR_SOURCE_CD IS NULL OR source_cd = @FACTOR_SOURCE_CD)
-                         AND cusip IN (SELECT cusip FROM #DATA_SET))
+                         AND security_id IN (SELECT security_id FROM #DATA_SET))
     BEGIN
       SELECT @ADATE = dateadd(dd, -1, @ADATE)
     END
@@ -129,9 +124,9 @@ BEGIN
 
   CREATE TABLE #WGT_FACTOR (
     bdate		datetime	NOT NULL,
-    cusip		varchar(32)	NULL,
-    factor_value	float		NULL,
-    wgt_factor_value	float		NULL
+    security_id	int			NULL,
+    factor_value float		NULL,
+    wgt_factor_value float	NULL
   )
 
   CREATE TABLE #NOT_NULL_SET (
@@ -144,13 +139,13 @@ BEGIN
   )
 
   INSERT #WGT_FACTOR
-  SELECT i.bdate, i.cusip, i.factor_value, NULL
-    FROM QER..instrument_factor i, #PRIOR_BDATES p
+  SELECT i.bdate, i.security_id, i.factor_value, NULL
+    FROM instrument_factor i, #PRIOR_BDATES p
    WHERE i.bdate = p.bdate
      AND i.factor_id = @FACTOR_ID
      AND i.update_tm <= @AS_OF_DATE
      AND (@FACTOR_SOURCE_CD IS NULL OR i.source_cd = @FACTOR_SOURCE_CD)
-     AND i.cusip IN (SELECT cusip FROM #DATA_SET)
+     AND i.security_id IN (SELECT security_id FROM #DATA_SET)
 
   WHILE EXISTS (SELECT * FROM #PRIOR_BDATES WHERE bdate NOT IN (SELECT bdate FROM #DONE))
   BEGIN
@@ -206,10 +201,10 @@ BEGIN
 
   UPDATE #DATA_SET
      SET factor_value = x.wgt_factor_value
-    FROM (SELECT cusip, sum(wgt_factor_value) AS wgt_factor_value
+    FROM (SELECT security_id, sum(wgt_factor_value) AS wgt_factor_value
             FROM #WGT_FACTOR
-           GROUP BY cusip) x
-   WHERE x.cusip = #DATA_SET.cusip
+           GROUP BY security_id) x
+   WHERE x.security_id = #DATA_SET.security_id
 
   DROP TABLE #DONE
   DROP TABLE #NOT_NULL_SET
@@ -218,55 +213,50 @@ BEGIN
 END
 ELSE --STRAIGHT RANK
 BEGIN
-  WHILE NOT EXISTS (SELECT * FROM QER..instrument_factor
+  WHILE NOT EXISTS (SELECT * FROM instrument_factor
                      WHERE bdate = @BDATE
                        AND factor_id = @FACTOR_ID
                        AND update_tm <= @AS_OF_DATE
                        AND (@FACTOR_SOURCE_CD IS NULL OR source_cd = @FACTOR_SOURCE_CD)
-                       AND cusip IN (SELECT cusip FROM #DATA_SET))
+                       AND security_id IN (SELECT security_id FROM #DATA_SET))
   BEGIN
     SELECT @BDATE = dateadd(dd, -1, @BDATE)
   END
 
   UPDATE #DATA_SET
      SET factor_value = f.factor_value
-    FROM QER..instrument_factor f,
-         (SELECT cusip, max(update_tm) as update_tm
-            FROM QER..instrument_factor
+    FROM instrument_factor f,
+         (SELECT security_id, max(update_tm) as update_tm
+            FROM instrument_factor
            WHERE bdate = @BDATE
-             AND cusip IN (SELECT cusip FROM #DATA_SET)
+             AND security_id IN (SELECT security_id FROM #DATA_SET)
              AND factor_id = @FACTOR_ID
              AND (@FACTOR_SOURCE_CD IS NULL OR source_cd = @FACTOR_SOURCE_CD)
              AND update_tm <= @AS_OF_DATE
-           GROUP BY cusip) x
+           GROUP BY security_id) x
    WHERE f.bdate = @BDATE
-     AND f.cusip = #DATA_SET.cusip
-     AND f.cusip = x.cusip
+     AND f.security_id = #DATA_SET.security_id
+     AND f.security_id = x.security_id
      AND f.factor_id = @FACTOR_ID
      AND (@FACTOR_SOURCE_CD IS NULL OR f.source_cd = @FACTOR_SOURCE_CD)
      AND f.update_tm = x.update_tm
 
   CREATE TABLE #NULL_SET (
-    mqa_id		varchar(32)		NULL,
-    ticker		varchar(16)		NULL,
-    cusip		varchar(32)		NULL,
-    sedol		varchar(32)		NULL,
-    isin		varchar(64)		NULL,
-    gv_key		int			NULL,
-    factor_value	float			NULL
+    security_id		int		NULL,
+    factor_value	float	NULL
   )
 
   INSERT #NULL_SET
-  SELECT mqa_id, ticker, cusip, sedol, isin, gv_key, factor_value
+  SELECT security_id, factor_value
     FROM #DATA_SET
 
   TRUNCATE TABLE #DATA_SET
 
-  INSERT #DATA_SET (mqa_id, ticker, cusip, sedol, isin, gv_key, factor_value)
-  SELECT mqa_id, ticker, cusip, sedol, isin, gv_key, factor_value
+  INSERT #DATA_SET (security_id, factor_value)
+  SELECT security_id, factor_value
     FROM #NULL_SET
    WHERE factor_value IS NOT NULL
-   ORDER BY factor_value, cusip
+   ORDER BY factor_value, security_id
 
   DELETE #NULL_SET
    WHERE factor_value IS NOT NULL
@@ -311,15 +301,15 @@ BEGIN
     END
 
     INSERT #NULL_SET
-    SELECT mqa_id, ticker, cusip, sedol, isin, gv_key, factor_value
+    SELECT security_id, factor_value
       FROM #DATA_SET
 
     TRUNCATE TABLE #DATA_SET
 
-    INSERT #DATA_SET (mqa_id, ticker, cusip, sedol, isin, gv_key, factor_value)
-    SELECT mqa_id, ticker, cusip, sedol, isin, gv_key, factor_value
+    INSERT #DATA_SET (security_id, factor_value)
+    SELECT security_id, factor_value
       FROM #NULL_SET
-     ORDER BY factor_value, cusip
+     ORDER BY factor_value, security_id
   END
 
   DROP TABLE #NULL_SET
@@ -341,3 +331,4 @@ ELSE
 go
 
 DROP TABLE #DATA_SET
+go

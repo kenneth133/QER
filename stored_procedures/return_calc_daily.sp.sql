@@ -18,7 +18,7 @@ DECLARE @RETURN_TYPE varchar(32),
         @STRATEGY_ID int,
         @WEIGHT varchar(16),
         @ACCOUNT_CD varchar(32),
-        @BM_UNIVERSE_ID int,
+        @BENCHMARK_CD varchar(50),
         @MODEL_PORTFOLIO_DEF_CD varchar(32),
         @PERIOD_TYPE varchar(2),
         @PERIODS int
@@ -36,7 +36,7 @@ BEGIN
            @STRATEGY_ID = r.strategy_id,
            @WEIGHT = r.weight,
            @ACCOUNT_CD = r.account_cd,
-           @BM_UNIVERSE_ID = r.bm_universe_id,
+           @BENCHMARK_CD = r.benchmark_cd,
            @MODEL_PORTFOLIO_DEF_CD = m.model_portfolio_def_cd,
            @PERIOD_TYPE = r.period_type,
            @PERIODS = r.periods
@@ -51,7 +51,7 @@ BEGIN
       SELECT '@STRATEGY_ID', @STRATEGY_ID
       SELECT '@WEIGHT', @WEIGHT
       SELECT '@ACCOUNT_CD', @ACCOUNT_CD
-      SELECT '@BM_UNIVERSE_ID', @BM_UNIVERSE_ID
+      SELECT '@BENCHMARK_CD', @BENCHMARK_CD
       SELECT '@MODEL_PORTFOLIO_DEF_CD', @MODEL_PORTFOLIO_DEF_CD
       SELECT '@PERIOD_TYPE', @PERIOD_TYPE
       SELECT '@PERIODS', @PERIODS
@@ -62,7 +62,7 @@ BEGIN
                                @STRATEGY_ID = @STRATEGY_ID,
                                @WEIGHT = @WEIGHT,
                                @ACCOUNT_CD = @ACCOUNT_CD,
-                               @BM_UNIVERSE_ID = @BM_UNIVERSE_ID,
+                               @BENCHMARK_CD = @BENCHMARK_CD,
                                @MODEL_PORTFOLIO_DEF_CD = @MODEL_PORTFOLIO_DEF_CD,
                                @PERIOD_TYPE = @PERIOD_TYPE,
                                @PERIODS = @PERIODS,
@@ -75,7 +75,7 @@ BEGIN
          @STRATEGY_ID = r.strategy_id,
          @WEIGHT = r.weight,
          @ACCOUNT_CD = r.account_cd,
-         @BM_UNIVERSE_ID = r.bm_universe_id,
+         @BENCHMARK_CD = r.benchmark_cd,
          @MODEL_PORTFOLIO_DEF_CD = m.model_portfolio_def_cd,
          @PERIOD_TYPE = r.period_type,
          @PERIODS = r.periods
@@ -90,7 +90,7 @@ BEGIN
     SELECT '@STRATEGY_ID', @STRATEGY_ID
     SELECT '@WEIGHT', @WEIGHT
     SELECT '@ACCOUNT_CD', @ACCOUNT_CD
-    SELECT '@BM_UNIVERSE_ID', @BM_UNIVERSE_ID
+    SELECT '@BENCHMARK_CD', @BENCHMARK_CD
     SELECT '@MODEL_PORTFOLIO_DEF_CD', @MODEL_PORTFOLIO_DEF_CD
     SELECT '@PERIOD_TYPE', @PERIOD_TYPE
     SELECT '@PERIODS', @PERIODS
@@ -101,7 +101,7 @@ BEGIN
                              @STRATEGY_ID = @STRATEGY_ID,
                              @WEIGHT = @WEIGHT,
                              @ACCOUNT_CD = @ACCOUNT_CD,
-                             @BM_UNIVERSE_ID = @BM_UNIVERSE_ID,
+                             @BENCHMARK_CD = @BENCHMARK_CD,
                              @MODEL_PORTFOLIO_DEF_CD = @MODEL_PORTFOLIO_DEF_CD,
                              @PERIOD_TYPE = @PERIOD_TYPE,
                              @PERIODS = @PERIODS,

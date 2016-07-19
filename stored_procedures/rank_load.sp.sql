@@ -65,6 +65,26 @@ BEGIN
     BEGIN SELECT @AS_OF_DATE = GETDATE() END
 END
 
+CREATE TABLE #RANK_STAGING (
+  bdate			datetime		NULL,
+  universe_dt	datetime		NULL,
+  security_id	int				NULL,
+  ticker		varchar(16)		NULL,
+  cusip			varchar(32)		NULL,
+  sedol			varchar(32)		NULL,
+  isin			varchar(64)		NULL,
+  currency_cd	varchar(3)		NULL,
+  exchange_nm	varchar(40)		NULL,
+  factor_value	float			NULL,
+  rank			int				NULL
+)
+
+INSERT #RANK_STAGING
+SELECT bdate, universe_dt, NULL, ticker, cusip, sedol, isin, currency_cd, exchange_nm, factor_value, rank
+  FROM rank_staging
+
+EXEC security_id_update @TABLE_NAME='#RANK_STAGING'
+
 DECLARE @SECTOR_MODEL_ID int,
         @UNIVERSE_ID int,
         @UNIVERSE_DT datetime,
@@ -99,15 +119,9 @@ BEGIN
 
   SELECT @BDATE = bdate,
          @UNIVERSE_DT = universe_dt
-    FROM rank_staging
+    FROM #RANK_STAGING
 
-  IF EXISTS (SELECT * FROM rank_staging
-              WHERE cusip IS NOT NULL
-                AND cusip NOT IN (SELECT cusip FROM sector_model_security
-                                   WHERE bdate = @BDATE
-                                     AND sector_model_id = @SECTOR_MODEL_ID
-                                     AND cusip IS NOT NULL))
-    BEGIN EXEC sector_model_security_populate @BDATE=@BDATE, @UNIVERSE_DT=@UNIVERSE_DT, @UNIVERSE_ID=@UNIVERSE_ID, @SECTOR_MODEL_ID=@SECTOR_MODEL_ID END
+  EXEC sector_model_security_populate @BDATE=@BDATE, @UNIVERSE_DT=@UNIVERSE_DT, @UNIVERSE_ID=@UNIVERSE_ID, @SECTOR_MODEL_ID=@SECTOR_MODEL_ID
 END
 
 INSERT rank_inputs
@@ -115,40 +129,39 @@ INSERT rank_inputs
        groups, against, against_id, rank_wgt_id, period_type, method, missing_method, missing_value)
 SELECT DISTINCT @RUN_TM, @AS_OF_DATE, bdate, universe_dt, @UNIVERSE_ID, @FACTOR_ID, @FACTOR_SOURCE_CD,
        @GROUPS, @AGAINST, @AGAINST_ID, @RANK_WGT_ID, @PERIOD_TYPE, @METHOD, @MISSING_METHOD, @MISSING_VALUE
-  FROM rank_staging
+  FROM #RANK_STAGING
 
 SELECT @RANK_EVENT_ID = MAX(rank_event_id)
   FROM rank_inputs
 
 IF @AGAINST = 'U'
 BEGIN
-  INSERT rank_output
-        (rank_event_id, mqa_id, ticker, cusip, sedol, isin, gv_key, factor_value, rank)
-  SELECT @RANK_EVENT_ID, mqa_id, ticker, cusip, sedol, isin, gv_key, factor_value, rank
-    FROM rank_staging
+  INSERT rank_output (rank_event_id, security_id, factor_value, rank)
+  SELECT @RANK_EVENT_ID, security_id, factor_value, rank
+    FROM #RANK_STAGING
 END
 ELSE IF @AGAINST = 'C'
 BEGIN
-  INSERT rank_output
-        (rank_event_id, mqa_id, ticker, cusip, sedol, isin, gv_key, factor_value, rank)
-  SELECT @RANK_EVENT_ID, r.mqa_id, r.ticker, r.cusip, r.sedol, r.isin, r.gv_key, r.factor_value, r.rank
-    FROM rank_staging r, sector_model_security ss
+  INSERT rank_output (rank_event_id, security_id, factor_value, rank)
+  SELECT @RANK_EVENT_ID, r.security_id, r.factor_value, r.rank
+    FROM #RANK_STAGING r, sector_model_security ss
    WHERE ss.sector_model_id = @SECTOR_MODEL_ID
      AND r.bdate = ss.bdate
-     AND r.cusip = ss.cusip
+     AND r.security_id = ss.security_id
      AND ss.sector_id = @AGAINST_ID
 END
 ELSE IF @AGAINST = 'G'
 BEGIN
-  INSERT rank_output
-        (rank_event_id, mqa_id, ticker, cusip, sedol, isin, gv_key, factor_value, rank)
-  SELECT @RANK_EVENT_ID, r.mqa_id, r.ticker, r.cusip, r.sedol, r.isin, r.gv_key, r.factor_value, r.rank
-    FROM rank_staging r, sector_model_security ss
+  INSERT rank_output (rank_event_id, security_id, factor_value, rank)
+  SELECT @RANK_EVENT_ID, r.security_id, r.factor_value, r.rank
+    FROM #RANK_STAGING r, sector_model_security ss
    WHERE ss.sector_model_id = @SECTOR_MODEL_ID
      AND r.bdate = ss.bdate
-     AND r.cusip = ss.cusip
+     AND r.security_id = ss.security_id
      AND ss.segment_id = @AGAINST_ID
 END
+
+DROP TABLE #RANK_STAGING
 
 RETURN 0
 go

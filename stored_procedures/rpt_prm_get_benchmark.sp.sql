@@ -15,32 +15,29 @@ AS
 
 IF @STRATEGY_ID IS NOT NULL AND @ACCOUNT_CD IS NOT NULL
 BEGIN
-  SELECT DISTINCT d.universe_cd
-    FROM account a, universe_def d
-   WHERE a.account_cd = @ACCOUNT_CD
-     AND a.strategy_id = @STRATEGY_ID
-     AND a.bm_universe_id = d.universe_id
-   ORDER BY d.universe_cd
+  SELECT DISTINCT benchmark_cd
+    FROM account
+   WHERE account_cd = @ACCOUNT_CD
+     AND strategy_id = @STRATEGY_ID
+   ORDER BY benchmark_cd
 END
 ELSE IF @STRATEGY_ID IS NOT NULL
 BEGIN
-  SELECT d.universe_cd, d.universe_id
-    FROM account a, universe_def d
-   WHERE a.strategy_id = @STRATEGY_ID
-     AND a.bm_universe_id = d.universe_id
+  SELECT benchmark_cd
+    FROM account
+   WHERE strategy_id = @STRATEGY_ID
    UNION
-  SELECT d.universe_cd, d.universe_id
+  SELECT d.universe_cd AS [benchmark_cd]
     FROM strategy g, universe_def d
    WHERE g.strategy_id = @STRATEGY_ID
      AND g.universe_id = d.universe_id
-   ORDER BY d.universe_cd
+   ORDER BY benchmark_cd
 END
 ELSE
 BEGIN
-  SELECT DISTINCT d.universe_cd, d.universe_id
-    FROM benchmark b, universe_def d
-   WHERE b.universe_id = d.universe_id
-   ORDER BY d.universe_cd
+  SELECT DISTINCT benchmark_cd
+    FROM benchmark
+   ORDER BY benchmark_cd
 END
 
 RETURN 0

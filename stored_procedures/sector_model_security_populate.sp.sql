@@ -10,11 +10,13 @@ BEGIN
         PRINT '<<< DROPPED PROCEDURE dbo.sector_model_security_populate >>>'
 END
 go
-CREATE PROCEDURE dbo.sector_model_security_populate @BDATE datetime,
-                                                    @SECTOR_MODEL_ID int,
-                                                    @UNIVERSE_DT datetime = NULL,
-                                                    @UNIVERSE_ID int =NULL,
-                                                    @DEBUG bit = NULL
+CREATE PROCEDURE dbo.sector_model_security_populate
+@BDATE datetime,
+@SECTOR_MODEL_ID int,
+@UNIVERSE_DT datetime = NULL,
+@UNIVERSE_CD varchar(32) = NULL,
+@UNIVERSE_ID int = NULL,
+@DEBUG bit = NULL
 AS
 
 /****
@@ -29,49 +31,79 @@ IF @BDATE IS NULL
 IF @SECTOR_MODEL_ID IS NULL
   BEGIN SELECT 'ERROR: @SECTOR_MODEL_ID IS A REQUIRED PARAMETER' RETURN -1 END
 
+IF @UNIVERSE_DT IS NULL
+  BEGIN SELECT @UNIVERSE_DT = @BDATE END
+
+IF @UNIVERSE_CD IS NOT NULL
+BEGIN
+  SELECT @UNIVERSE_ID = universe_id
+    FROM universe_def
+   WHERE universe_cd = @UNIVERSE_CD
+END
+
 CREATE TABLE #SEC (
-  mqa_id		varchar(32)	NULL,
-  ticker		varchar(16)	NULL,
-  cusip			varchar(32)	NULL,
-  sedol			varchar(32)	NULL,
-  isin			varchar(64)	NULL,
-  gv_key		int		NULL,
+  security_id			int		NULL,
   gics_sub_industry_num	int		NULL,
   russell_industry_num	int		NULL
 )
 
-IF @UNIVERSE_ID IS NOT NULL AND @UNIVERSE_DT IS NOT NULL
+IF @UNIVERSE_CD IS NOT NULL AND EXISTS (SELECT 1 FROM benchmark WHERE benchmark_cd=@UNIVERSE_CD)
 BEGIN
   INSERT #SEC
-  SELECT DISTINCT i.mqa_id, i.ticker, i.cusip, i.sedol, i.isin, i.gv_key, i.gics_sub_industry_num, i.russell_industry_num
-    FROM instrument_characteristics i, universe_makeup u
-   WHERE i.bdate = @BDATE
-     AND u.universe_dt = @UNIVERSE_DT
-     AND u.universe_id = @UNIVERSE_ID
-     AND i.cusip = u.cusip
-     AND u.cusip IS NOT NULL
-     AND u.cusip NOT IN (SELECT cusip FROM sector_model_security
-                          WHERE bdate = @BDATE
-                            AND sector_model_id = @SECTOR_MODEL_ID
-                            AND cusip IS NOT NULL)
+  SELECT DISTINCT y.security_id, y.gics_sub_industry_num, y.russell_industry_num
+    FROM equity_common..security y, equity_common..position p
+   WHERE p.reference_date = @UNIVERSE_DT
+     AND p.reference_date = p.effective_date
+     AND p.acct_cd IN (SELECT DISTINCT acct_cd FROM equity_common..account WHERE parent = @UNIVERSE_CD OR acct_cd = @UNIVERSE_CD)
+     AND p.security_id = y.security_id
+     AND p.security_id IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM sector_model_security ss
+                      WHERE ss.bdate = @BDATE
+                        AND ss.sector_model_id = @SECTOR_MODEL_ID
+                        AND ss.security_id = p.security_id
+                        AND ss.security_id IS NOT NULL)
+END
+ELSE IF @UNIVERSE_ID IS NOT NULL
+BEGIN
+  INSERT #SEC
+  SELECT DISTINCT y.security_id, y.gics_sub_industry_num, y.russell_industry_num
+    FROM equity_common..security y, universe_makeup p
+   WHERE p.universe_dt = @UNIVERSE_DT
+     AND p.universe_id = @UNIVERSE_ID
+     AND p.security_id = y.security_id
+     AND p.security_id IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM sector_model_security ss
+                      WHERE ss.bdate = @BDATE
+                        AND ss.sector_model_id = @SECTOR_MODEL_ID
+                        AND ss.security_id = p.security_id
+                        AND ss.security_id IS NOT NULL)
 END
 ELSE
 BEGIN
   INSERT #SEC
-  SELECT DISTINCT i.mqa_id, i.ticker, i.cusip, i.sedol, i.isin, i.gv_key, i.gics_sub_industry_num, i.russell_industry_num
-    FROM instrument_characteristics i
-   WHERE i.bdate = @BDATE
-     AND i.cusip IS NOT NULL
-     AND i.cusip NOT IN (SELECT cusip FROM sector_model_security
-                          WHERE bdate = @BDATE
-                            AND sector_model_id = @SECTOR_MODEL_ID
-                            AND cusip IS NOT NULL)
+  SELECT DISTINCT y.security_id, y.gics_sub_industry_num, y.russell_industry_num
+    FROM equity_common..security y,
+        (SELECT security_id FROM universe_makeup WHERE universe_dt = @UNIVERSE_DT AND security_id IS NOT NULL
+          UNION
+         SELECT security_id FROM equity_common..position
+          WHERE reference_date = @UNIVERSE_DT
+            AND reference_date = effective_date
+            AND acct_cd IN (SELECT DISTINCT a.acct_cd
+                              FROM equity_common..account a, benchmark b
+                             WHERE a.parent = b.benchmark_cd OR a.acct_cd = b.benchmark_cd)
+            AND security_id IS NOT NULL) x
+   WHERE x.security_id = y.security_id
+     AND NOT EXISTS (SELECT 1 FROM sector_model_security ss
+                      WHERE ss.bdate = @BDATE
+                        AND ss.sector_model_id = @SECTOR_MODEL_ID
+                        AND ss.security_id = x.security_id
+                        AND ss.security_id IS NOT NULL)
 END
 
 IF @DEBUG = 1
 BEGIN
   SELECT '#SEC: AFTER INITIAL INSERT'
-  SELECT * FROM #SEC ORDER BY ticker, cusip, sedol, isin
+  SELECT * FROM #SEC ORDER BY security_id
 END
 
 IF NOT EXISTS (SELECT * FROM #SEC)
@@ -81,10 +113,10 @@ BEGIN
 END
 
 CREATE TABLE #NODE (
-  sector_id	int		NOT NULL,
-  segment_id	int		NULL,
+  sector_id		int			NOT NULL,
+  segment_id	int			NULL,
   child_type	varchar(1)	NOT NULL,
-  child_id	int		NOT NULL
+  child_id		int			NOT NULL
 )
 
 INSERT #NODE
@@ -240,7 +272,7 @@ BEGIN
   IF @DEBUG = 1
   BEGIN
     SELECT '#SEC: AFTER MAPPING GICS_SUB_INDUSTRY TO RUSSELL_INDUSTRY WHERE RUSSELL_INDUSTRY IS NULL'
-    SELECT * FROM #SEC ORDER BY ticker, cusip, sedol, isin
+    SELECT * FROM #SEC ORDER BY security_id
   END
 END
 --GICS_SUB_INDUSTRY TO RUSSELL_INDUSTRY WHERE RUSSELL_INDUSTRY IS NULL: END
@@ -261,7 +293,7 @@ BEGIN
   IF @DEBUG = 1
   BEGIN
     SELECT '#SEC: AFTER MAPPING RUSSELL_INDUSTRY TO GICS_SUB_INDUSTRY WHERE GICS_SUB_INDUSTRY IS NULL'
-    SELECT * FROM #SEC ORDER BY ticker, cusip, sedol, isin
+    SELECT * FROM #SEC ORDER BY security_id
   END
 END
 --RUSSELL_INDUSTRY TO GICS_SUB_INDUSTRY WHERE GICS_SUB_INDUSTRY IS NULL: END
@@ -277,25 +309,23 @@ DELETE #LEAF
 --DELETE GICS_SUB_INDUSTRY_NUM FROM A SECTOR (2): END
 
 INSERT sector_model_security
-SELECT @BDATE, @SECTOR_MODEL_ID, l.sector_id, l.segment_id,
-       s.mqa_id, s.ticker, s.cusip, s.sedol, s.isin, s.gv_key
+SELECT @BDATE, @SECTOR_MODEL_ID, l.sector_id, l.segment_id, s.security_id
   FROM #LEAF l, #SEC s
  WHERE l.child_type = 'I'
    AND l.child_num = s.russell_industry_num
 UNION
-SELECT @BDATE, @SECTOR_MODEL_ID, l.sector_id, l.segment_id,
-       s.mqa_id, s.ticker, s.cusip, s.sedol, s.isin, s.gv_key
+SELECT @BDATE, @SECTOR_MODEL_ID, l.sector_id, l.segment_id, s.security_id
   FROM #LEAF l, #SEC s
  WHERE l.child_type = 'B'
    AND l.child_num = s.gics_sub_industry_num
 
 IF @DEBUG = 1
 BEGIN
-  SELECT 'QER..sector_model_security (1) AFTER INSERT'
+  SELECT 'sector_model_security (1) AFTER INSERT'
   SELECT * FROM sector_model_security
    WHERE bdate = @BDATE
      AND sector_model_id = @SECTOR_MODEL_ID
-   ORDER BY ticker, cusip, sedol, isin
+   ORDER BY security_id
 END
 
 --SECURITY EXCEPTIONS LOGIC (WITH NO OVERRIDE): BEGIN
@@ -304,49 +334,49 @@ IF EXISTS (SELECT * FROM sector_model_security_exception
               AND override != 1)
 BEGIN
   INSERT sector_model_security
-  SELECT DISTINCT @BDATE, @SECTOR_MODEL_ID, x.sector_id, x.segment_id,
-         s.mqa_id, s.ticker, s.cusip, s.sedol, s.isin, s.gv_key
+  SELECT DISTINCT @BDATE, @SECTOR_MODEL_ID, x.sector_id, x.segment_id, s.security_id
     FROM #SEC s, sector_model_security_exception x
    WHERE x.sector_model_id = @SECTOR_MODEL_ID
      AND x.override != 1
-     AND s.cusip = x.cusip
-     AND x.cusip IS NOT NULL
-     AND x.cusip NOT IN (SELECT cusip FROM sector_model_security
-                          WHERE bdate = @BDATE
-                            AND sector_model_id = @SECTOR_MODEL_ID
-                            AND cusip IS NOT NULL)
+     AND s.security_id = x.security_id
+     AND x.security_id IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM sector_model_security ss
+                      WHERE ss.bdate = @BDATE
+                        AND ss.sector_model_id = @SECTOR_MODEL_ID
+                        AND ss.security_id = x.security_id
+                        AND ss.security_id IS NOT NULL)
 
   IF @DEBUG = 1
   BEGIN
-    SELECT 'QER..sector_model_security (2) AFTER INSERT'
+    SELECT 'sector_model_security (2) AFTER INSERT'
     SELECT * FROM sector_model_security
      WHERE bdate = @BDATE
        AND sector_model_id = @SECTOR_MODEL_ID
-     ORDER BY ticker, cusip, sedol, isin
+     ORDER BY security_id
   END
 END
 --SECURITY EXCEPTIONS LOGIC (WITH NO OVERRIDE): END
 
 INSERT sector_model_security
-SELECT DISTINCT @BDATE, @SECTOR_MODEL_ID, NULL, NULL,
-       mqa_id, ticker, cusip, sedol, isin, gv_key
-  FROM #SEC
- WHERE cusip IS NOT NULL
-   AND cusip NOT IN (SELECT cusip FROM sector_model_security
-                          WHERE bdate = @BDATE
-                            AND sector_model_id = @SECTOR_MODEL_ID
-                            AND cusip IS NOT NULL)
+SELECT DISTINCT @BDATE, @SECTOR_MODEL_ID, NULL, NULL, s.security_id
+  FROM #SEC s
+ WHERE s.security_id IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sector_model_security ss
+                    WHERE ss.bdate = @BDATE
+                      AND ss.sector_model_id = @SECTOR_MODEL_ID
+                      AND ss.security_id = s.security_id
+                      AND ss.security_id IS NOT NULL)
 
 DROP TABLE #SEC
 DROP TABLE #LEAF
 
 IF @DEBUG = 1
 BEGIN
-  SELECT 'QER..sector_model_security (3) AFTER INSERT'
+  SELECT 'sector_model_security (3) AFTER INSERT'
   SELECT * FROM sector_model_security
    WHERE bdate = @BDATE
      AND sector_model_id = @SECTOR_MODEL_ID
-   ORDER BY ticker, cusip, sedol, isin
+   ORDER BY security_id
 END
 
 --SECURITY EXCEPTIONS LOGIC (WITH OVERRIDE): BEGIN
@@ -362,15 +392,15 @@ BEGIN
      AND sector_model_security.sector_model_id = @SECTOR_MODEL_ID
      AND sector_model_security.sector_model_id = x.sector_model_id
      AND x.override = 1
-     AND sector_model_security.cusip = x.cusip
+     AND sector_model_security.security_id = x.security_id
 
   IF @DEBUG = 1
   BEGIN
-    SELECT 'QER..sector_model_security (4) AFTER UPDATE'
+    SELECT 'sector_model_security (4) AFTER UPDATE'
     SELECT * FROM sector_model_security
      WHERE bdate = @BDATE
        AND sector_model_id = @SECTOR_MODEL_ID
-     ORDER BY ticker, cusip, sedol, isin
+     ORDER BY security_id
   END
 END
 --SECURITY EXCEPTIONS LOGIC (WITH OVERRIDE): END

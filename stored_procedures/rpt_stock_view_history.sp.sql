@@ -36,7 +36,7 @@ IF @PERIOD_TYPE NOT IN ('YY', 'YYYY', 'QQ', 'Q', 'MM', 'M', 'WK', 'WW', 'DD', 'D
   BEGIN SELECT 'ERROR: INVALID VALUE PASSED FOR @PERIOD_TYPE PARAMETER' RETURN -1 END
 IF @IDENTIFIER_TYPE IS NULL
   BEGIN SELECT 'ERROR: @IDENTIFIER_TYPE IS A REQUIRED PARAMETER' RETURN -1 END
-IF @IDENTIFIER_TYPE NOT IN ('TICKER', 'CUSIP', 'SEDOL')
+IF @IDENTIFIER_TYPE NOT IN ('TICKER', 'CUSIP', 'SEDOL', 'ISIN')
   BEGIN SELECT 'ERROR: INVALID VALUE PASSED FOR @IDENTIFIER_TYPE PARAMETER' RETURN -1 END
 IF @IDENTIFIER_VALUE IS NULL
   BEGIN SELECT 'ERROR: @IDENTIFIER_VALUE IS A REQUIRED PARAMETER' RETURN -1 END
@@ -110,79 +110,92 @@ BEGIN
 END
 
 CREATE TABLE #SECURITY (
-  mqa_id	varchar(32)	NULL,
-  ticker	varchar(16)	NULL,
-  cusip		varchar(32)	NULL,
-  sedol		varchar(32)	NULL,
-  isin		varchar(64)	NULL,
-  imnt_nm	varchar(255)	NULL,
+  bdate			datetime		NULL,
+  security_id	int				NULL,
+  ticker		varchar(16)		NULL,
+  cusip			varchar(32)		NULL,
+  sedol			varchar(32)		NULL,
+  isin			varchar(64)		NULL,
+  imnt_nm		varchar(255)	NULL,
+  currency_cd	varchar(3)		NULL,
+  exchange_nm	varchar(40)		NULL,
 
-  country_cd	varchar(4)	NULL,
+  country_cd	varchar(4)		NULL,
   country_nm	varchar(128)	NULL,
-  sector_id	int		NULL,
-  sector_nm	varchar(64)	NULL,
-  segment_id	int		NULL,
+  sector_id		int				NULL,
+  sector_nm		varchar(64)		NULL,
+  segment_id	int				NULL,
   segment_nm	varchar(128)	NULL
 )
 
 IF @IDENTIFIER_TYPE = 'TICKER'
-BEGIN
-  INSERT #SECURITY
-        (mqa_id, ticker, cusip, sedol, isin, imnt_nm, country_cd)
-  SELECT i.mqa_id, i.ticker, i.cusip, i.sedol, i.isin, i.imnt_nm, i.country
-    FROM instrument_characteristics i
-   WHERE i.bdate = @BDATE
-     AND i.ticker = @IDENTIFIER_VALUE
-END
+  BEGIN INSERT #SECURITY (bdate, ticker) VALUES (@BDATE, @IDENTIFIER_VALUE) END
 ELSE IF @IDENTIFIER_TYPE = 'CUSIP'
 BEGIN
-  INSERT #SECURITY
-        (mqa_id, ticker, cusip, sedol, isin, imnt_nm, country_cd)
-  SELECT i.mqa_id, i.ticker, i.cusip, i.sedol, i.isin, i.imnt_nm, i.country
-    FROM instrument_characteristics i
-   WHERE i.bdate = @BDATE
-     AND i.cusip = @IDENTIFIER_VALUE
+  INSERT #SECURITY (bdate, cusip) VALUES (@BDATE, @IDENTIFIER_VALUE)
+  UPDATE #SECURITY SET cusip = equity_common.dbo.fnCusipIncludeCheckDigit(cusip)
 END
 ELSE IF @IDENTIFIER_TYPE = 'SEDOL'
 BEGIN
-  INSERT #SECURITY
-        (mqa_id, ticker, cusip, sedol, isin, imnt_nm, country_cd)
-  SELECT i.mqa_id, i.ticker, i.cusip, i.sedol, i.isin, i.imnt_nm, i.country
-    FROM instrument_characteristics i
-   WHERE i.bdate = @BDATE
-     AND i.sedol = @IDENTIFIER_VALUE
+  INSERT #SECURITY (bdate, sedol) VALUES (@BDATE, @IDENTIFIER_VALUE)
+  UPDATE #SECURITY SET sedol = equity_common.dbo.fnSedolIncludeCheckDigit(sedol)
+END
+ELSE IF @IDENTIFIER_TYPE = 'ISIN'
+  BEGIN INSERT #SECURITY (bdate, isin) VALUES (@BDATE, @IDENTIFIER_VALUE) END
+
+DECLARE @SQL varchar(1000)
+
+SELECT @SQL = 'UPDATE #SECURITY '
+SELECT @SQL = @SQL + 'SET security_id = y.security_id '
+SELECT @SQL = @SQL + 'FROM strategy g, universe_makeup p, equity_common..security y '
+SELECT @SQL = @SQL + 'WHERE g.strategy_id = '+CONVERT(varchar,@STRATEGY_ID)+' '
+SELECT @SQL = @SQL + 'AND g.universe_id = p.universe_id '
+SELECT @SQL = @SQL + 'AND p.universe_dt = '''+CONVERT(varchar,@BDATE,112)+''' '
+SELECT @SQL = @SQL + 'AND p.security_id = y.security_id '
+SELECT @SQL = @SQL + 'AND #SECURITY.'+@IDENTIFIER_TYPE+' = y.'+@IDENTIFIER_TYPE
+
+IF @DEBUG=1 BEGIN SELECT '@SQL', @SQL END
+EXEC(@SQL)
+
+IF @DEBUG = 1
+BEGIN
+  SELECT '#SECURITY (1)'
+  SELECT * FROM #SECURITY ORDER BY cusip, sedol
+END
+
+IF EXISTS (SELECT 1 FROM #SECURITY WHERE security_id IS NULL)
+  BEGIN EXEC security_id_update @TABLE_NAME='#SECURITY' END
+
+IF @DEBUG = 1
+BEGIN
+  SELECT '#SECURITY (2)'
+  SELECT * FROM #SECURITY ORDER BY cusip, sedol
 END
 
 UPDATE #SECURITY
-   SET country_nm = d.decode
-  FROM decode d
- WHERE d.item = 'COUNTRY'
-   AND #SECURITY.country_cd = d.code
+   SET ticker = y.ticker,
+       cusip = y.cusip,
+       sedol = y.sedol,
+       isin = y.isin,
+       imnt_nm = y.security_name,
+       country_cd = y.issue_country_cd
+  FROM equity_common..security y
+ WHERE #SECURITY.security_id = y.security_id
 
-IF @IDENTIFIER_TYPE IN ('TICKER', 'CUSIP')
-BEGIN
-  UPDATE #SECURITY
-     SET sector_id = ss.sector_id,
-         segment_id = ss.segment_id
-    FROM sector_model_security ss, strategy g, factor_model f
-   WHERE g.strategy_id = @STRATEGY_ID
-     AND g.factor_model_id = f.factor_model_id
-     AND ss.bdate = @BDATE
-     AND ss.sector_model_id = f.sector_model_id
-     AND #SECURITY.cusip = ss.cusip
-END
-ELSE IF @IDENTIFIER_TYPE = 'SEDOL'
-BEGIN
-  UPDATE #SECURITY
-     SET sector_id = ss.sector_id,
-         segment_id = ss.segment_id
-    FROM sector_model_security ss, strategy g, factor_model f
-   WHERE g.strategy_id = @STRATEGY_ID
-     AND g.factor_model_id = f.factor_model_id
-     AND ss.bdate = @BDATE
-     AND ss.sector_model_id = f.sector_model_id
-     AND #SECURITY.sedol = ss.sedol
-END
+UPDATE #SECURITY
+   SET country_nm = UPPER(c.country_name)
+  FROM equity_common..country c
+ WHERE #SECURITY.country_cd = c.country_cd
+
+UPDATE #SECURITY
+   SET sector_id = ss.sector_id,
+       segment_id = ss.segment_id
+  FROM sector_model_security ss, strategy g, factor_model f
+ WHERE g.strategy_id = @STRATEGY_ID
+   AND g.factor_model_id = f.factor_model_id
+   AND #SECURITY.bdate = ss.bdate
+   AND ss.sector_model_id = f.sector_model_id
+   AND #SECURITY.security_id = ss.security_id
 
 UPDATE #SECURITY
    SET sector_nm = d.sector_nm
@@ -196,7 +209,7 @@ UPDATE #SECURITY
 
 IF @DEBUG = 1
 BEGIN
-  SELECT '#SECURITY'
+  SELECT '#SECURITY (3)'
   SELECT * FROM #SECURITY ORDER BY cusip, sedol
 END
 
@@ -211,45 +224,33 @@ SELECT ticker		AS [Ticker],
   FROM #SECURITY
 
 CREATE TABLE #POSITION (
-  bdate		datetime	NULL,
-  cusip		varchar(32)	NULL,
-  sedol		varchar(32)	NULL,
+  bdate			datetime	NULL,
+  security_id	int			NULL,
 
-  units		float		NULL,
-  price		float		NULL,
-  mval		float		NULL,
+  units			float		NULL,
+  price			float		NULL,
+  mval			float		NULL,
   
-  account_wgt	float	NULL,
-  benchmark_wgt	float	NULL,
-  acct_bmk_wgt	float	NULL
+  account_wgt	float		NULL,
+  benchmark_wgt	float		NULL,
+  acct_bmk_wgt	float		NULL
 )
 
-INSERT #POSITION (bdate, cusip, sedol, units)
-SELECT p.bdate, p.cusip, p.sedol, ISNULL(p.units, 0.0)
-  FROM #RESULT r, position p
- WHERE r.bdate = p.bdate
-   AND p.account_cd = @ACCOUNT_CD
+INSERT #POSITION (bdate, security_id, units)
+SELECT p.reference_date, p.security_id, SUM(ISNULL(p.quantity,0.0))
+  FROM #RESULT r, equity_common..position p
+ WHERE r.bdate = p.reference_date
+   AND p.reference_date = p.effective_date
+   AND p.acct_cd IN (SELECT DISTINCT acct_cd FROM equity_common..account WHERE parent = @ACCOUNT_CD OR acct_cd = @ACCOUNT_CD)
+ GROUP BY p.reference_date, p.security_id
 
-IF @IDENTIFIER_TYPE IN ('TICKER', 'CUSIP')
-BEGIN
-  UPDATE #POSITION
-     SET price = i.price_close
-    FROM instrument_characteristics i
-   WHERE #POSITION.bdate = i.bdate
-     AND #POSITION.cusip = i.cusip
-END
-ELSE IF @IDENTIFIER_TYPE = 'SEDOL'
-BEGIN
-  UPDATE #POSITION
-     SET price = i.price_close
-    FROM instrument_characteristics i
-   WHERE #POSITION.bdate = i.bdate
-     AND #POSITION.sedol = i.sedol
-END
+DELETE #POSITION WHERE units = 0.0
 
 UPDATE #POSITION
-   SET price = 1.0
- WHERE cusip = '_USD'
+   SET price = p.price_close_usd
+  FROM equity_common..market_price p
+ WHERE #POSITION.bdate = p.reference_date
+   AND #POSITION.security_id = p.security_id
 
 UPDATE #POSITION
    SET mval = units * price
@@ -263,46 +264,43 @@ UPDATE #POSITION
 IF @DEBUG = 1
 BEGIN
   SELECT '#POSITION (1)'
-  SELECT * FROM #POSITION ORDER BY bdate, cusip, sedol
+  SELECT * FROM #POSITION ORDER BY bdate, security_id
 END
 
-IF @IDENTIFIER_TYPE IN ('TICKER', 'CUSIP')
-BEGIN
-  DELETE #POSITION
-   WHERE cusip NOT IN (SELECT cusip FROM #SECURITY)
-END
-ELSE IF @IDENTIFIER_TYPE = 'SEDOL'
-BEGIN
-  DELETE #POSITION
-   WHERE sedol NOT IN (SELECT sedol FROM #SECURITY)
-END
+DELETE #POSITION
+ WHERE security_id NOT IN (SELECT security_id FROM #SECURITY)
 
-INSERT #POSITION (bdate, cusip, sedol, account_wgt)
-SELECT r.bdate, s.cusip, s.sedol, 0.0
+INSERT #POSITION (bdate, security_id, account_wgt)
+SELECT r.bdate, s.security_id, 0.0
   FROM #SECURITY s, #RESULT r
  WHERE r.bdate NOT IN (SELECT bdate FROM #POSITION)
 
-IF @IDENTIFIER_TYPE IN ('TICKER', 'CUSIP')
+IF EXISTS (SELECT 1 FROM account a, benchmark b
+            WHERE a.strategy_id = @STRATEGY_ID
+              AND a.account_cd = @ACCOUNT_CD
+              AND a.benchmark_cd = b.benchmark_cd)
 BEGIN
   UPDATE #POSITION
-     SET benchmark_wgt = p.weight / 100.0
-    FROM account a, universe_makeup p
+     SET benchmark_wgt = w.weight
+    FROM account a, equity_common..benchmark_weight w
    WHERE a.strategy_id = @STRATEGY_ID
      AND a.account_cd = @ACCOUNT_CD
-     AND a.bm_universe_id = p.universe_id
-     AND #POSITION.bdate = p.universe_dt
-     AND #POSITION.cusip = p.cusip
+     AND a.benchmark_cd = w.acct_cd
+     AND #POSITION.bdate = w.reference_date
+     AND w.reference_date = w.effective_date
+     AND #POSITION.security_id = w.security_id
 END
-ELSE IF @IDENTIFIER_TYPE = 'SEDOL'
+ELSE
 BEGIN
   UPDATE #POSITION
      SET benchmark_wgt = p.weight / 100.0
-    FROM account a, universe_makeup p
+    FROM account a, universe_def d, universe_makeup p
    WHERE a.strategy_id = @STRATEGY_ID
      AND a.account_cd = @ACCOUNT_CD
-     AND a.bm_universe_id = p.universe_id
+     AND a.benchmark_cd = d.universe_cd
+     AND d.universe_id = p.universe_id
      AND #POSITION.bdate = p.universe_dt
-     AND #POSITION.sedol = p.sedol
+     AND #POSITION.security_id = p.security_id
 END
 
 UPDATE #POSITION
@@ -315,7 +313,7 @@ UPDATE #POSITION
 IF @DEBUG = 1
 BEGIN
   SELECT '#POSITION (2)'
-  SELECT * FROM #POSITION ORDER BY bdate, cusip, sedol
+  SELECT * FROM #POSITION ORDER BY bdate, security_id
 END
 
 UPDATE #RESULT
@@ -325,30 +323,15 @@ UPDATE #RESULT
 
 DROP TABLE #POSITION
 
-IF @IDENTIFIER_TYPE IN ('TICKER', 'CUSIP')
-BEGIN
-  UPDATE #RESULT
-     SET total_score = s.total_score,
-         universe_score = s.universe_score,
-         sector_score = s.sector_score,
-         segment_score = s.segment_score
-    FROM scores s
-   WHERE s.strategy_id = @STRATEGY_ID
-     AND s.bdate = #RESULT.bdate
-     AND s.cusip IN (SELECT cusip FROM #SECURITY)
-END
-ELSE IF @IDENTIFIER_TYPE = 'SEDOL'
-BEGIN
-  UPDATE #RESULT
-     SET total_score = s.total_score,
-         universe_score = s.universe_score,
-         sector_score = s.sector_score,
-         segment_score = s.segment_score
-    FROM scores s
-   WHERE s.strategy_id = @STRATEGY_ID
-     AND s.bdate = #RESULT.bdate
-     AND s.sedol IN (SELECT sedol FROM #SECURITY)
-END
+UPDATE #RESULT
+   SET total_score = s.total_score,
+       universe_score = s.universe_score,
+       sector_score = s.sector_score,
+       segment_score = s.segment_score
+  FROM scores s
+ WHERE s.strategy_id = @STRATEGY_ID
+   AND s.bdate = #RESULT.bdate
+   AND s.security_id IN (SELECT security_id FROM #SECURITY)
 
 IF @DEBUG = 1
 BEGIN
@@ -358,29 +341,16 @@ END
 
 DECLARE @PRECALC bit,
         @NUM int,
-        @CATEGORY varchar(64),
-        @SQL varchar(1000)
+        @CATEGORY varchar(64)
 
 SELECT @PRECALC = 0
 
-IF @IDENTIFIER_TYPE IN ('TICKER', 'CUSIP')
-BEGIN
-  IF EXISTS (SELECT * FROM category_score
-              WHERE bdate IN (SELECT DISTINCT bdate FROM #RESULT)
-                AND strategy_id = @STRATEGY_ID
-                AND score_level = 'T'
-                AND cusip IN (SELECT cusip FROM #SECURITY))
-    BEGIN SELECT @PRECALC = 1 END
-END
-ELSE IF @IDENTIFIER_TYPE = 'SEDOL'
-BEGIN
-  IF EXISTS (SELECT * FROM category_score
-              WHERE bdate IN (SELECT DISTINCT bdate FROM #RESULT)
-                AND strategy_id = @STRATEGY_ID
-                AND score_level = 'T'
-                AND sedol IN (SELECT sedol FROM #SECURITY))
-    BEGIN SELECT @PRECALC = 1 END
-END
+IF EXISTS (SELECT * FROM category_score
+            WHERE bdate IN (SELECT DISTINCT bdate FROM #RESULT)
+              AND strategy_id = @STRATEGY_ID
+              AND score_level = 'T'
+              AND security_id IN (SELECT security_id FROM #SECURITY))
+  BEGIN SELECT @PRECALC = 1 END
 
 CREATE TABLE #FACTOR_CATEGORY (
   ordinal		int identity(1,1)	NOT NULL,
@@ -390,30 +360,15 @@ CREATE TABLE #FACTOR_CATEGORY (
 
 IF @PRECALC = 1
 BEGIN
-  IF @IDENTIFIER_TYPE IN ('TICKER', 'CUSIP')
-  BEGIN
-    INSERT #FACTOR_CATEGORY (category_cd, category_nm)
-    SELECT code, decode FROM decode
-     WHERE item = 'FACTOR_CATEGORY'
-       AND code IN (SELECT DISTINCT category FROM category_score
-                     WHERE bdate IN (SELECT DISTINCT bdate FROM #RESULT)
-                       AND strategy_id = @STRATEGY_ID
-                       AND score_level = 'T'
-                       AND cusip IN (SELECT cusip FROM #SECURITY))
-    ORDER BY decode
-  END
-  ELSE IF @IDENTIFIER_TYPE = 'SEDOL'
-  BEGIN
-    INSERT #FACTOR_CATEGORY (category_cd, category_nm)
-    SELECT code, decode FROM decode
-     WHERE item = 'FACTOR_CATEGORY'
-       AND code IN (SELECT DISTINCT category FROM category_score
-                     WHERE bdate IN (SELECT DISTINCT bdate FROM #RESULT)
-                       AND strategy_id = @STRATEGY_ID
-                       AND score_level = 'T'
-                       AND sedol IN (SELECT sedol FROM #SECURITY))
-    ORDER BY decode
-  END
+  INSERT #FACTOR_CATEGORY (category_cd, category_nm)
+  SELECT code, decode FROM decode
+   WHERE item = 'FACTOR_CATEGORY'
+     AND code IN (SELECT DISTINCT category FROM category_score
+                   WHERE bdate IN (SELECT DISTINCT bdate FROM #RESULT)
+                     AND strategy_id = @STRATEGY_ID
+                     AND score_level = 'T'
+                     AND security_id IN (SELECT security_id FROM #SECURITY))
+  ORDER BY decode
 
   IF @DEBUG = 1
   BEGIN
@@ -440,10 +395,7 @@ BEGIN
     SELECT @SQL = @SQL + 'FROM #FACTOR_CATEGORY f, category_score s '
     SELECT @SQL = @SQL + 'WHERE #RESULT.bdate = s.bdate '
     SELECT @SQL = @SQL + 'AND s.strategy_id = ' + CONVERT(varchar,@STRATEGY_ID) + ' '
-    IF @IDENTIFIER_TYPE IN ('TICKER', 'CUSIP')
-      BEGIN SELECT @SQL = @SQL + 'AND s.cusip IN (SELECT cusip FROM #SECURITY) ' END
-    ELSE IF @IDENTIFIER_TYPE = 'SEDOL'
-      BEGIN SELECT @SQL = @SQL + 'AND s.sedol IN (SELECT sedol FROM #SECURITY) ' END
+    SELECT @SQL = @SQL + 'AND s.security_id IN (SELECT security_id FROM #SECURITY) '
     SELECT @SQL = @SQL + 'AND s.score_level = ''T'' '
     SELECT @SQL = @SQL + 'AND s.category = f.category_cd '
     SELECT @SQL = @SQL + 'AND f.category_nm = ''' + @CATEGORY + ''''
@@ -471,38 +423,19 @@ BEGIN
     weighted_rank	float		NULL
   )
 
-  IF @IDENTIFIER_TYPE IN ('TICKER', 'CUSIP')
-  BEGIN
-    INSERT #RESULT2 (bdate, factor_id, factor_cd, factor_nm, against, against_id, weight1, rank)
-    SELECT r.bdate, f.factor_id, f.factor_cd, f.factor_nm, w.against, w.against_id, w.weight, o.rank
-      FROM #RESULT r, #SECURITY s, strategy g, factor f, factor_against_weight w, rank_inputs i, rank_output o
-     WHERE g.strategy_id = @STRATEGY_ID
-       AND g.factor_model_id = w.factor_model_id
-       AND w.factor_id = f.factor_id
-       AND i.bdate = r.bdate
-       AND i.universe_id = g.universe_id
-       AND i.factor_id = w.factor_id
-       AND i.against = w.against
-       AND (i.against_id = w.against_id OR (i.against_id IS NULL AND w.against_id IS NULL))
-       AND i.rank_event_id = o.rank_event_id
-       AND s.cusip = o.cusip
-  END
-  ELSE IF @IDENTIFIER_TYPE = 'SEDOL'
-  BEGIN
-    INSERT #RESULT2 (bdate, factor_id, factor_cd, factor_nm, against, against_id, weight1, rank)
-    SELECT r.bdate, f.factor_id, f.factor_cd, f.factor_nm, w.against, w.against_id, w.weight, o.rank
-      FROM #RESULT r, #SECURITY s, strategy g, factor f, factor_against_weight w, rank_inputs i, rank_output o
-     WHERE g.strategy_id = @STRATEGY_ID
-       AND g.factor_model_id = w.factor_model_id
-       AND w.factor_id = f.factor_id
-       AND i.bdate = r.bdate
-       AND i.universe_id = g.universe_id
-       AND i.factor_id = w.factor_id
-       AND i.against = w.against
-       AND (i.against_id = w.against_id OR (i.against_id IS NULL AND w.against_id IS NULL))
-       AND i.rank_event_id = o.rank_event_id
-       AND s.sedol = o.sedol
-  END
+  INSERT #RESULT2 (bdate, factor_id, factor_cd, factor_nm, against, against_id, weight1, rank)
+  SELECT r.bdate, f.factor_id, f.factor_cd, f.factor_nm, w.against, w.against_id, w.weight, o.rank
+    FROM #RESULT r, #SECURITY s, strategy g, factor f, factor_against_weight w, rank_inputs i, rank_output o
+   WHERE g.strategy_id = @STRATEGY_ID
+     AND g.factor_model_id = w.factor_model_id
+     AND w.factor_id = f.factor_id
+     AND i.bdate = r.bdate
+     AND i.universe_id = g.universe_id
+     AND i.factor_id = w.factor_id
+     AND i.against = w.against
+     AND (i.against_id = w.against_id OR (i.against_id IS NULL AND w.against_id IS NULL))
+     AND i.rank_event_id = o.rank_event_id
+     AND s.security_id = o.security_id
 
   IF @DEBUG = 1
   BEGIN
@@ -662,7 +595,7 @@ BEGIN
   SELECT @SQL = @SQL + ', [' + @CATEGORY + ']'
 END
 
-SELECT @SQL = @SQL + 'FROM #RESULT ORDER BY bdate DESC'
+SELECT @SQL = @SQL + ' FROM #RESULT ORDER BY bdate DESC'
 IF @DEBUG = 1 BEGIN SELECT '@SQL', @SQL END
 EXEC(@SQL)
 

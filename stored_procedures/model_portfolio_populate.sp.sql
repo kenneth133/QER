@@ -15,12 +15,7 @@ CREATE PROCEDURE dbo.model_portfolio_populate @BDATE datetime = NULL,
 AS
 
 CREATE TABLE #MODEL_PORTFOLIO (
-  mqa_id		varchar(32)	NULL,
-  ticker		varchar(16)	NULL,
-  cusip			varchar(32)	NULL,
-  sedol			varchar(32)	NULL,
-  isin			varchar(64)	NULL,
-  gv_key		int			NULL,
+  security_id	int			NULL,
   ls_flag		bit			NULL, --1=LONG, 0=SHORT
   mkt_cap		float		NULL,
   eq_weight		float		NULL,
@@ -38,8 +33,8 @@ SELECT @MODEL_PORTFOLIO_DEF_CD = d.model_portfolio_def_cd,
 
 IF @MODEL_PORTFOLIO_DEF_CD = '80-100'
 BEGIN--LONG 80-100
-  INSERT #MODEL_PORTFOLIO (mqa_id, ticker, cusip, sedol, isin, gv_key, ls_flag)
-  SELECT mqa_id, ticker, cusip, sedol, isin, gv_key, 1
+  INSERT #MODEL_PORTFOLIO (security_id, ls_flag)
+  SELECT security_id, 1
     FROM scores
    WHERE bdate = @BDATE
      AND strategy_id = @STRATEGY_ID
@@ -73,8 +68,8 @@ BEGIN
 
   IF @RANK_ORDER = 1 --HIGHER IS BETTER
   BEGIN
-    INSERT #MODEL_PORTFOLIO (mqa_id, ticker, cusip, sedol, isin, gv_key, ls_flag)
-    SELECT mqa_id, ticker, cusip, sedol, isin, gv_key, 1
+    INSERT #MODEL_PORTFOLIO (security_id, ls_flag)
+    SELECT security_id, 1
       FROM scores
      WHERE bdate = @BDATE
        AND strategy_id = @STRATEGY_ID
@@ -82,8 +77,8 @@ BEGIN
 
     IF @MODEL_PORTFOLIO_DEF_CD LIKE '%-%'
     BEGIN
-      INSERT #MODEL_PORTFOLIO (mqa_id, ticker, cusip, sedol, isin, gv_key, ls_flag)
-      SELECT mqa_id, ticker, cusip, sedol, isin, gv_key, 0
+      INSERT #MODEL_PORTFOLIO (security_id, ls_flag)
+      SELECT security_id, 0
         FROM scores
        WHERE bdate = @BDATE
          AND strategy_id = @STRATEGY_ID
@@ -92,8 +87,8 @@ BEGIN
   END
   ELSE IF @RANK_ORDER = 0 --LOWER IS BETTER
   BEGIN
-    INSERT #MODEL_PORTFOLIO (mqa_id, ticker, cusip, sedol, isin, gv_key, ls_flag)
-    SELECT mqa_id, ticker, cusip, sedol, isin, gv_key, 1
+    INSERT #MODEL_PORTFOLIO (security_id, ls_flag)
+    SELECT security_id, 1
       FROM scores
      WHERE bdate = @BDATE
        AND strategy_id = @STRATEGY_ID
@@ -101,8 +96,8 @@ BEGIN
 
     IF @MODEL_PORTFOLIO_DEF_CD LIKE '%-%'
     BEGIN
-      INSERT #MODEL_PORTFOLIO (mqa_id, ticker, cusip, sedol, isin, gv_key, ls_flag)
-      SELECT mqa_id, ticker, cusip, sedol, isin, gv_key, 0
+      INSERT #MODEL_PORTFOLIO (security_id, ls_flag)
+      SELECT security_id, 0
         FROM scores
        WHERE bdate = @BDATE
          AND strategy_id = @STRATEGY_ID
@@ -123,11 +118,10 @@ DECLARE @TOTAL_MCAP_LONG float,
         @COUNT_SHORT float
 
 UPDATE #MODEL_PORTFOLIO
-   SET mkt_cap = i.mkt_cap
-  FROM instrument_characteristics i
- WHERE i.bdate = @BDATE
-   AND #MODEL_PORTFOLIO.cusip = i.cusip
-   AND i.source_cd = 'MQA'
+   SET mkt_cap = market_cap_usd
+  FROM equity_common..market_price p
+ WHERE p.reference_date = @BDATE
+   AND #MODEL_PORTFOLIO.security_id = p.security_id
 
 SELECT @TOTAL_MCAP_LONG = SUM(mkt_cap) / 100.0
   FROM #MODEL_PORTFOLIO
@@ -193,7 +187,7 @@ DELETE universe_makeup
    AND universe_id = @UNIVERSE_ID
 
 INSERT universe_makeup
-SELECT @BDATE, @UNIVERSE_ID, mqa_id, ticker, cusip, sedol, isin, gv_key, eq_weight
+SELECT @BDATE, @UNIVERSE_ID, security_id, eq_weight
   FROM #MODEL_PORTFOLIO
 
 SELECT @UNIVERSE_ID = universe_id
@@ -208,7 +202,7 @@ DELETE universe_makeup
    AND universe_id = @UNIVERSE_ID
 
 INSERT universe_makeup
-SELECT @BDATE, @UNIVERSE_ID, mqa_id, ticker, cusip, sedol, isin, gv_key, cap_weight
+SELECT @BDATE, @UNIVERSE_ID, security_id, cap_weight
   FROM #MODEL_PORTFOLIO
 
 DROP TABLE #MODEL_PORTFOLIO

@@ -10,45 +10,61 @@ BEGIN
 END
 go
 CREATE PROCEDURE dbo.russell_model_maint
+@BDATE datetime
 AS
 
-EXEC russell_sector_get
-EXEC russell_industry_get
+IF @BDATE IS NULL
+  BEGIN SELECT 'ERROR: @BDATE IS A REQUIRED PARAMETER' RETURN -1 END
+
+EXEC russell_sector_get @BDATE
+EXEC russell_industry_get @BDATE
 
 CREATE TABLE #RUSSELL_SECTOR_INDUSTRY (
-  sector_id		int	NULL,
+  sector_id				int	NULL,
   russell_sector_num	int	NULL,
-  industry_id		int	NULL,
+  industry_id			int	NULL,
   russell_industry_num	int	NULL
 )
 
 INSERT #RUSSELL_SECTOR_INDUSTRY
-SELECT DISTINCT NULL, russell_sector_num, NULL, russell_industry_num
-  FROM QER..instrument_characteristics_staging
- WHERE russell_sector_num IS NOT NULL
-   AND russell_industry_num IS NOT NULL
+SELECT DISTINCT NULL, y.russell_sector_num, NULL, y.russell_industry_num
+  FROM equity_common..security y,
+      (SELECT security_id FROM universe_makeup WHERE universe_dt = @BDATE
+       UNION
+       SELECT security_id FROM equity_common..position
+        WHERE reference_date = @BDATE
+          AND reference_date = effective_date
+          AND acct_cd IN (SELECT DISTINCT a.acct_cd
+                            FROM equity_common..account a,
+                                (SELECT account_cd AS [account_cd] FROM account
+                                 UNION
+                                 SELECT benchmark_cd AS [account_cd] FROM benchmark) q
+                           WHERE a.parent = q.account_cd OR a.acct_cd = q.account_cd)) x
+ WHERE y.security_id = x.security_id
+   AND y.russell_sector_num IS NOT NULL
+   AND y.russell_industry_num IS NOT NULL
 
 UPDATE #RUSSELL_SECTOR_INDUSTRY
    SET sector_id = d.sector_id
-  FROM QER..sector_model m, QER..sector_def d
+  FROM sector_model m, sector_def d
  WHERE m.sector_model_cd = 'RUSSELL-S'
    AND m.sector_model_id = d.sector_model_id
    AND d.sector_num = #RUSSELL_SECTOR_INDUSTRY.russell_sector_num
 
 UPDATE #RUSSELL_SECTOR_INDUSTRY
    SET industry_id = i.industry_id
-  FROM QER..industry_model m, QER..industry i
+  FROM industry_model m, industry i
  WHERE m.industry_model_cd = 'RUSSELL-I'
    AND m.industry_model_id = i.industry_model_id
    AND i.industry_num = #RUSSELL_SECTOR_INDUSTRY.russell_industry_num
 
 DELETE #RUSSELL_SECTOR_INDUSTRY
-  FROM QER..sector_makeup p
+  FROM sector_makeup p
  WHERE p.sector_id = #RUSSELL_SECTOR_INDUSTRY.sector_id
    AND p.sector_child_type = 'I'
    AND p.sector_child_id = #RUSSELL_SECTOR_INDUSTRY.industry_id
 
-INSERT QER..sector_makeup
+INSERT sector_makeup
 SELECT sector_id, 'I', industry_id
   FROM #RUSSELL_SECTOR_INDUSTRY
 

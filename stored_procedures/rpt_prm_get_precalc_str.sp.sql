@@ -13,20 +13,20 @@ CREATE PROCEDURE dbo.rpt_prm_get_precalc_str @STRATEGY_ID int
 AS
 
 CREATE TABLE #RESULT (
-  return_calc_daily_id	int		not null,
-  return_type		varchar(32)	not null,
-  strategy_id		int		not null,
-  weight		varchar(16)	not null,
-  account_cd		varchar(32)	null,
-  bm_universe_id	int		null,
-  model_portfolio_def_cd varchar(32)	null,
-  period_type		varchar(2)	not null,
-  periods		int		not null,
+  return_calc_daily_id int		not null,
+  return_type	varchar(32)		not null,
+  strategy_id	int				not null,
+  weight		varchar(16)		not null,
+  account_cd	varchar(32)		null,
+  benchmark_cd	varchar(50)		null,
+  model_portfolio_def_cd varchar(32) null,
+  period_type	varchar(2)		not null,
+  periods		int				not null,
   rtn_str		varchar(255)	null
 )
 
-INSERT #RESULT (return_calc_daily_id, return_type, strategy_id, weight, account_cd, bm_universe_id, model_portfolio_def_cd, period_type, periods)
-SELECT r.return_calc_daily_id, r.return_type, r.strategy_id, r.weight, r.account_cd, r.bm_universe_id, m.model_portfolio_def_cd, r.period_type, r.periods
+INSERT #RESULT (return_calc_daily_id, return_type, strategy_id, weight, account_cd, benchmark_cd, model_portfolio_def_cd, period_type, periods)
+SELECT r.return_calc_daily_id, r.return_type, r.strategy_id, r.weight, r.account_cd, r.benchmark_cd, m.model_portfolio_def_cd, r.period_type, r.periods
   FROM return_calc_params_daily r, model_portfolio_def m
  WHERE r.strategy_id = @STRATEGY_ID
    AND r.model_portfolio_def_id = m.model_portfolio_def_id
@@ -36,26 +36,20 @@ UPDATE #RESULT
  WHERE return_type = 'ACCT'
 
 UPDATE #RESULT
-   SET rtn_str = d.universe_cd + ' ('
-  FROM universe_def d
+   SET rtn_str = benchmark_cd + ' ('
  WHERE #RESULT.return_type = 'BMK'
-   AND #RESULT.bm_universe_id = d.universe_id
 
 UPDATE #RESULT
    SET rtn_str = model_portfolio_def_cd + ' ('
  WHERE return_type = 'MODEL'
 
 UPDATE #RESULT
-   SET rtn_str = account_cd + '-' + d.universe_cd + ' ('
-  FROM universe_def d
+   SET rtn_str = account_cd + '-' + benchmark_cd + ' ('
  WHERE #RESULT.return_type = 'ACCT-BMK'
-   AND #RESULT.bm_universe_id = d.universe_id
 
 UPDATE #RESULT
-   SET rtn_str = model_portfolio_def_cd + '-' + d.universe_cd + ' ('
-  FROM universe_def d
+   SET rtn_str = model_portfolio_def_cd + '-' + benchmark_cd + ' ('
  WHERE #RESULT.return_type = 'MODEL-BMK'
-   AND #RESULT.bm_universe_id = d.universe_id
 
 UPDATE #RESULT
    SET rtn_str = account_cd + '-' + model_portfolio_def_cd + ' ('

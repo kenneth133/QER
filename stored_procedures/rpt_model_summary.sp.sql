@@ -19,11 +19,6 @@ CREATE PROCEDURE dbo.rpt_model_summary @STRATEGY_ID int,
 AS
 /* MODEL - SUMMARY */
 
-/****
-* KNOWN ISSUES:
-*   THIS PROCEDURE DOES NOT HANDLE INTERNATIONAL SECURITIES - IT JOINS ON CUSIP ONLY
-****/
-
 IF @STRATEGY_ID IS NULL
   BEGIN SELECT 'ERROR: @STRATEGY_ID IS A REQUIRED PARAMETER' RETURN -1 END
 IF @BDATE IS NULL
@@ -32,44 +27,44 @@ IF @ACCOUNT_CD IS NULL
   BEGIN SELECT 'ERROR: @ACCOUNT_CD IS A REQUIRED PARAMETER' RETURN -1 END
 
 CREATE TABLE #RESULT (
-  mqa_id		varchar(32)	NULL,
-  ticker		varchar(16)	NULL,
-  cusip			varchar(32)	NULL,
-  sedol			varchar(32)	NULL,
-  isin			varchar(64)	NULL,
+  security_id	int				NULL,
+  ticker		varchar(16)		NULL,
+  cusip			varchar(32)		NULL,
+  sedol			varchar(32)		NULL,
+  isin			varchar(64)		NULL,
   imnt_nm		varchar(255)	NULL,
 
-  country_cd		varchar(4)	NULL,
-  country_nm		varchar(128)	NULL,
-  sector_id		int		NULL,
-  sector_nm		varchar(64)	NULL,
-  segment_id		int		NULL,
-  segment_nm		varchar(128)	NULL,
+  country_cd	varchar(4)		NULL,
+  country_nm	varchar(128)	NULL,
+  sector_id		int				NULL,
+  sector_nm		varchar(64)		NULL,
+  segment_id	int				NULL,
+  segment_nm	varchar(128)	NULL,
 
-  russell_sector_num	int		NULL,
-  russell_sector_nm	varchar(64)	NULL,
-  russell_industry_num	int		NULL,
+  russell_sector_num	int				NULL,
+  russell_sector_nm		varchar(64)		NULL,
+  russell_industry_num	int				NULL,
   russell_industry_nm	varchar(255)	NULL,
 
-  gics_sector_num	int		NULL,
-  gics_sector_nm	varchar(64)	NULL,
-  gics_segment_num	int		NULL,
-  gics_segment_nm	varchar(128)	NULL,
-  gics_industry_num	int		NULL,
-  gics_industry_nm	varchar(255)	NULL,
-  gics_sub_industry_num	int		NULL,
+  gics_sector_num		int				NULL,
+  gics_sector_nm		varchar(64)		NULL,
+  gics_segment_num		int				NULL,
+  gics_segment_nm		varchar(128)	NULL,
+  gics_industry_num		int				NULL,
+  gics_industry_nm		varchar(255)	NULL,
+  gics_sub_industry_num	int				NULL,
   gics_sub_industry_nm	varchar(255)	NULL,
 
   total_score		float		NULL,
   universe_score	float		NULL,
   country_score		float		NULL,
-  ss_score		float		NULL,
+  ss_score			float		NULL,
   sector_score		float		NULL,
   segment_score		float		NULL,
 
-  units			float		NULL,
-  price			float		NULL,
-  mval			float		NULL,
+  units		float		NULL,
+  price		float		NULL,
+  mval		float		NULL,
   
   account_wgt		float		NULL,
   benchmark_wgt		float		NULL,
@@ -77,22 +72,34 @@ CREATE TABLE #RESULT (
 )
 
 INSERT #RESULT
-      (mqa_id, ticker, cusip, sedol, isin,
+      (security_id, ticker, cusip, sedol, isin, imnt_nm, country_cd,
+       russell_sector_num, russell_industry_num,
+       gics_sector_num, gics_segment_num, gics_industry_num, gics_sub_industry_num,
        total_score, universe_score, country_score, ss_score, sector_score, segment_score)
-SELECT DISTINCT mqa_id, ticker, cusip, sedol, isin,
-       total_score, universe_score, country_score, ss_score, sector_score, segment_score
-  FROM scores
- WHERE bdate = @BDATE
-   AND strategy_id = @STRATEGY_ID
+SELECT y.security_id, y.ticker, y.cusip, y.sedol, y.isin, y.security_name, y.issue_country_cd,
+       y.russell_sector_num, y.russell_industry_num,
+       y.gics_sector_num, y.gics_industry_group_num, y.gics_industry_num, y.gics_sub_industry_num,
+       s.total_score, s.universe_score, s.country_score, s.ss_score, s.sector_score, s.segment_score
+  FROM scores s, equity_common..security y
+ WHERE s.bdate = @BDATE
+   AND s.strategy_id = @STRATEGY_ID
+   AND s.security_id = y.security_id
 
 INSERT #RESULT
-      (mqa_id, ticker, cusip, sedol, isin)
-SELECT p.mqa_id, p.ticker, p.cusip, p.sedol, p.isin
-  FROM position p
- WHERE p.bdate = @BDATE
-   AND p.account_cd = @ACCOUNT_CD
-   AND p.cusip IS NOT NULL
-   AND p.cusip NOT IN (SELECT cusip FROM #RESULT WHERE cusip IS NOT NULL)
+      (security_id, ticker, cusip, sedol, isin, imnt_nm, country_cd,
+       russell_sector_num, russell_industry_num,
+       gics_sector_num, gics_segment_num, gics_industry_num, gics_sub_industry_num)
+SELECT security_id, ticker, cusip, sedol, isin, security_name, issue_country_cd,
+       russell_sector_num, russell_industry_num,
+       gics_sector_num, gics_industry_group_num, gics_industry_num, gics_sub_industry_num
+  FROM equity_common..security
+ WHERE security_id IN (SELECT DISTINCT security_id
+                         FROM equity_common..position
+                        WHERE reference_date = @BDATE
+                          AND reference_date = effective_date
+                          AND acct_cd IN (SELECT DISTINCT acct_cd FROM equity_common..account WHERE parent = @ACCOUNT_CD OR acct_cd = @ACCOUNT_CD)
+                          AND security_id IS NOT NULL
+                          AND security_id NOT IN (SELECT security_id FROM #RESULT WHERE security_id IS NOT NULL))
 
 IF @DEBUG = 1
 BEGIN
@@ -108,7 +115,7 @@ UPDATE #RESULT
    AND g.factor_model_id = f.factor_model_id
    AND ss.bdate = @BDATE
    AND ss.sector_model_id = f.sector_model_id
-   AND #RESULT.cusip = ss.cusip
+   AND #RESULT.security_id = ss.security_id
 
 UPDATE #RESULT
    SET sector_nm = d.sector_nm
@@ -121,31 +128,15 @@ UPDATE #RESULT
  WHERE #RESULT.segment_id = d.segment_id
 
 UPDATE #RESULT
-   SET imnt_nm = i.imnt_nm,
-       country_cd = i.country,
-       price = i.price_close,
-       russell_sector_num = i.russell_sector_num,
-       russell_industry_num = i.russell_industry_num,
-       gics_sector_num = i.gics_sector_num,
-       gics_segment_num = i.gics_segment_num,
-       gics_industry_num = i.gics_industry_num,
-       gics_sub_industry_num = i.gics_sub_industry_num
-  FROM instrument_characteristics i
- WHERE i.bdate = @BDATE
-   AND #RESULT.cusip = i.cusip
+   SET price = p.price_close_usd
+  FROM equity_common..market_price p
+ WHERE #RESULT.security_id = p.security_id
+   AND p.reference_date = @BDATE
 
 UPDATE #RESULT
-   SET country_nm = d.decode
-  FROM decode d
- WHERE d.item = 'COUNTRY'
-   AND #RESULT.country_cd = d.code
-
-UPDATE #RESULT
-   SET imnt_nm = 'CASH',
-       country_cd = 'US',
-       country_nm = 'UNITED STATES',
-       price = 1.0
- WHERE cusip = '_USD'
+   SET country_nm = UPPER(c.country_name)
+  FROM equity_common..country c
+ WHERE #RESULT.country_cd = c.country_cd
 
 BEGIN--UPDATE SECTOR INFO
   UPDATE #RESULT
@@ -194,11 +185,14 @@ BEGIN--UPDATE SECTOR INFO
 END--UPDATE SECTOR INFO
 
 UPDATE #RESULT
-   SET units = p.units
-  FROM position p
- WHERE p.bdate = @BDATE
-   AND p.account_cd = @ACCOUNT_CD
-   AND #RESULT.cusip = p.cusip
+   SET units = x.quantity
+  FROM (SELECT security_id, SUM(ISNULL(quantity,0.0)) AS [quantity]
+          FROM equity_common..position
+         WHERE reference_date = @BDATE
+           AND reference_date = effective_date
+           AND acct_cd IN (SELECT DISTINCT acct_cd FROM equity_common..account WHERE parent = @ACCOUNT_CD OR acct_cd = @ACCOUNT_CD)
+         GROUP BY security_id) x
+ WHERE #RESULT.security_id = x.security_id
 
 IF @DEBUG = 1
 BEGIN
@@ -226,14 +220,33 @@ END
 ELSE
   BEGIN UPDATE #RESULT SET account_wgt = 0.0 END
 
-UPDATE #RESULT
-   SET benchmark_wgt = p.weight / 100.0
-  FROM account a, universe_makeup p
- WHERE a.strategy_id = @STRATEGY_ID
-   AND a.account_cd = @ACCOUNT_CD
-   AND a.bm_universe_id = p.universe_id
-   AND p.universe_dt = @BDATE
-   AND #RESULT.cusip = p.cusip
+IF EXISTS (SELECT 1 FROM account a, benchmark b
+            WHERE a.strategy_id = @STRATEGY_ID
+              AND a.account_cd = @ACCOUNT_CD
+              AND a.benchmark_cd = b.benchmark_cd)
+BEGIN
+  UPDATE #RESULT
+     SET benchmark_wgt = w.weight
+    FROM account a, equity_common..benchmark_weight w
+   WHERE a.strategy_id = @STRATEGY_ID
+     AND a.account_cd = @ACCOUNT_CD
+     AND a.benchmark_cd = w.acct_cd
+     AND w.reference_date = @BDATE
+     AND w.reference_date = w.effective_date
+     AND #RESULT.security_id = w.security_id
+END
+ELSE
+BEGIN
+  UPDATE #RESULT
+     SET benchmark_wgt = p.weight / 100.0
+    FROM account a, universe_def d, universe_makeup p
+   WHERE a.strategy_id = @STRATEGY_ID
+     AND a.account_cd = @ACCOUNT_CD
+     AND a.benchmark_cd = d.universe_cd
+     AND d.universe_id = p.universe_id
+     AND p.universe_dt = @BDATE
+     AND #RESULT.security_id = p.security_id
+END
 
 UPDATE #RESULT
    SET benchmark_wgt = 0.0

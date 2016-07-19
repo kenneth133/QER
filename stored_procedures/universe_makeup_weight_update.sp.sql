@@ -30,23 +30,20 @@ BEGIN
 END
 
 CREATE TABLE #UNIV (
-  ticker	varchar(16)		NULL,
-  cusip		varchar(32)		NULL,
-  sedol		varchar(32)		NULL,
-  isin		varchar(64)		NULL,
-  mkt_cap	float			NULL,
-  weight	float			NULL
+  security_id	int		NULL,
+  mkt_cap		float	NULL,
+  weight		float	NULL
 )
 
 IF @WEIGHT = 'CAP'
 BEGIN
   INSERT #UNIV
-  SELECT i.ticker, i.cusip, i.sedol, i.isin, i.mkt_cap, NULL
-    FROM universe_makeup p, instrument_characteristics i
-   WHERE p.universe_dt = @UNIVERSE_DT
-     AND p.universe_id = @UNIVERSE_ID
-     AND i.bdate = p.universe_dt
-     AND i.cusip = p.cusip
+  SELECT p.security_id, p.market_cap_usd, NULL
+    FROM universe_makeup u, equity_common..market_price p
+   WHERE u.universe_dt = @UNIVERSE_DT
+     AND u.universe_id = @UNIVERSE_ID
+     AND u.universe_dt = p.reference_date
+     AND u.security_id = p.security_id
 
   UPDATE #UNIV
      SET mkt_cap = 0.0
@@ -61,7 +58,7 @@ BEGIN
     FROM #UNIV v
    WHERE universe_makeup.universe_dt = @UNIVERSE_DT
      AND universe_makeup.universe_id = @UNIVERSE_ID
-     AND universe_makeup.cusip = v.cusip
+     AND universe_makeup.security_id = v.security_id
 END
 
 DROP TABLE #UNIV

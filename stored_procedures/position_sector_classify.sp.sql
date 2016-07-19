@@ -15,7 +15,7 @@ AS
 DECLARE @BDATE2 datetime
 
 IF @BDATE IS NULL
-  BEGIN EXEC QER..business_date_get @DIFF=-1, @RET_DATE=@BDATE2 OUTPUT END
+  BEGIN EXEC business_date_get @DIFF=-1, @RET_DATE=@BDATE2 OUTPUT END
 ELSE
   BEGIN SELECT @BDATE2 = @BDATE END
 
@@ -41,24 +41,23 @@ BEGIN
     FROM #SECTOR_MODEL_ACCOUNT
    WHERE sector_model_id > @SECTOR_MODEL_ID
 
-  INSERT universe_makeup (universe_dt, universe_id, mqa_id, ticker, cusip, sedol, isin, gv_key)
-  SELECT DISTINCT @BDATE2, @DUMMY_UNIVERSE_ID, i.mqa_id, i.ticker, i.cusip, i.sedol, i.isin, i.gv_key
-    FROM instrument_characteristics i,
-        (SELECT DISTINCT p.cusip
-           FROM #SECTOR_MODEL_ACCOUNT a, position p
-          WHERE a.sector_model_id = @SECTOR_MODEL_ID
-            AND a.account_cd = p.account_cd
-            AND p.bdate = @BDATE2) x
-   WHERE i.bdate = @BDATE2
-     AND i.cusip = x.cusip
-     AND NOT EXISTS (SELECT * FROM sector_model_security ss
+  INSERT universe_makeup (universe_dt, universe_id, security_id)
+  SELECT DISTINCT @BDATE2, @DUMMY_UNIVERSE_ID, p.security_id
+    FROM equity_common..position p
+   WHERE p.reference_date = @BDATE2
+     AND p.reference_date = p.effective_date
+     AND p.acct_cd IN (SELECT DISTINCT acct_cd
+                         FROM equity_common..account a,
+                             (SELECT DISTINCT account_cd FROM #SECTOR_MODEL_ACCOUNT WHERE sector_model_id = @SECTOR_MODEL_ID) x
+                        WHERE a.parent = x.account_cd OR a.acct_cd = x.account_cd)
+     AND NOT EXISTS (SELECT 1 FROM sector_model_security ss
                       WHERE ss.bdate = @BDATE2
                         AND ss.sector_model_id = @SECTOR_MODEL_ID
-                        AND ss.cusip = i.cusip)
+                        AND ss.security_id = p.security_id)
 
   IF EXISTS (SELECT * FROM universe_makeup WHERE universe_id = @DUMMY_UNIVERSE_ID)
   BEGIN
-    EXEC sector_model_security_populate @BDATE2, @SECTOR_MODEL_ID, @BDATE2, @DUMMY_UNIVERSE_ID
+    EXEC sector_model_security_populate @BDATE=@BDATE2, @SECTOR_MODEL_ID=@SECTOR_MODEL_ID, @UNIVERSE_DT=@BDATE2, @UNIVERSE_ID=@DUMMY_UNIVERSE_ID
     DELETE universe_makeup WHERE universe_id = @DUMMY_UNIVERSE_ID
   END
 END

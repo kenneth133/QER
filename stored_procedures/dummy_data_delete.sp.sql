@@ -12,13 +12,13 @@ go
 CREATE PROCEDURE dbo.dummy_data_delete
 AS
 
-DELETE QER..rank_output
-  FROM QER..rank_inputs i
- WHERE QER..rank_output.rank_event_id = i.rank_event_id
-   AND i.factor_id IN (SELECT factor_id FROM QER..factor WHERE factor_cd = 'DUMMY')
+/*
+NOTE:
+FOR DEBUGGING PURPOSES, DO NOT DELETE DUMMY DATA FROM rank_inputs and rank_output
+*/
 
-DELETE QER..instrument_factor
- WHERE factor_id IN (SELECT factor_id FROM QER..factor WHERE factor_cd = 'DUMMY')
+DELETE instrument_factor
+ WHERE factor_id IN (SELECT factor_id FROM factor WHERE factor_cd = 'DUMMY')
 
 RETURN 0
 go

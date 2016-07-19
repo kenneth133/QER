@@ -22,11 +22,10 @@ AS
 
 /****
 * KNOWN ISSUES:
-*   1. THIS PROCEDURE DOES NOT HANDLE INTERNATIONAL SECURITIES - IT JOINS ON CUSIP ONLY
-*   2. THIS PROCEDURE WILL NOT HANDLE SITUATION WHERE
-*      - THE FACTOR MODEL OR SECTOR MODEL HAS CHANGED BETWEEN THE TWO DATES;
-*          DATABASE CONTAINS LATEST MODELS ONLY (I.E. LOOKS AT PREV_BDATE WITH CURRENT MODELS)
-*      - SECURITY HAS CHANGED CLASSIFICATION IN RUSSELL AND/OR GICS SECTOR MODEL(S)
+*   THIS PROCEDURE WILL NOT HANDLE SITUATION WHERE
+*   - THE FACTOR MODEL OR SECTOR MODEL HAS CHANGED BETWEEN THE TWO DATES;
+*     DATABASE CONTAINS LATEST MODELS ONLY (I.E. LOOKS AT PREV_BDATE WITH CURRENT MODELS)
+*   - SECURITY HAS CHANGED CLASSIFICATION IN RUSSELL AND/OR GICS SECTOR MODEL(S)
 ****/
 
 IF @BDATE IS NULL
@@ -58,30 +57,29 @@ BEGIN
 END
 
 CREATE TABLE #POSITION (
-  cusip		varchar(32)	NULL,
-  sedol		varchar(32)	NULL,
-  units		float		NULL,
-  price		float		NULL,
-  mval		float		NULL,
-  weight	float		NULL,
-  bmk_wgt	float		NULL
+  security_id	int		NULL,
+  units			float	NULL,
+  price			float	NULL,
+  mval			float	NULL,
+  weight		float	NULL,
+  bmk_wgt		float	NULL
 )
 
-INSERT #POSITION (cusip, sedol, units)
-SELECT cusip, sedol, units
-  FROM position
- WHERE bdate = @BDATE
-   AND account_cd = @ACCOUNT_CD
+INSERT #POSITION (security_id, units)
+SELECT security_id, SUM(ISNULL(quantity,0.0))
+  FROM equity_common..position
+ WHERE reference_date = @BDATE
+   AND reference_date = effective_date
+   AND acct_cd IN (SELECT DISTINCT acct_cd FROM equity_common..account WHERE parent = @ACCOUNT_CD OR acct_cd = @ACCOUNT_CD)
+ GROUP BY security_id
+
+DELETE #POSITION WHERE units = 0.0
 
 UPDATE #POSITION
-   SET price = i.price_close
-  FROM instrument_characteristics i
- WHERE i.bdate = @BDATE
-   AND #POSITION.cusip = i.cusip
-
-UPDATE #POSITION
-   SET price = 1.0
- WHERE cusip = '_USD'
+   SET price = p.price_close_usd
+  FROM equity_common..market_price p
+ WHERE p.reference_date = @BDATE
+   AND #POSITION.security_id = p.security_id
 
 UPDATE #POSITION
    SET price = 0.0
@@ -94,14 +92,33 @@ UPDATE #POSITION
    SET weight = mval / x.tot_mval
   FROM (SELECT SUM(mval) AS tot_mval FROM #POSITION) x
 
-UPDATE #POSITION
-   SET bmk_wgt = p.weight / 100.0
-  FROM account a, universe_makeup p
- WHERE a.strategy_id = @STRATEGY_ID
-   AND a.account_cd = @ACCOUNT_CD
-   AND p.universe_dt = @BDATE
-   AND p.universe_id = a.bm_universe_id
-   AND #POSITION.cusip = p.cusip
+IF EXISTS (SELECT 1 FROM account a, benchmark b
+            WHERE a.strategy_id = @STRATEGY_ID
+              AND a.account_cd = @ACCOUNT_CD
+              AND a.benchmark_cd = b.benchmark_cd)
+BEGIN
+  UPDATE #POSITION
+     SET bmk_wgt = bw.weight
+    FROM account a, equity_common..benchmark_weight bw
+   WHERE a.strategy_id = @STRATEGY_ID
+     AND a.account_cd = @ACCOUNT_CD
+     AND bw.reference_date = @BDATE
+     AND bw.reference_date = bw.effective_date
+     AND bw.acct_cd = a.benchmark_cd
+     AND #POSITION.security_id = bw.security_id
+END
+ELSE
+BEGIN
+  UPDATE #POSITION
+     SET bmk_wgt = p.weight / 100.0
+    FROM account a, universe_def d, universe_makeup p
+   WHERE a.strategy_id = @STRATEGY_ID
+     AND a.account_cd = @ACCOUNT_CD
+     AND a.benchmark_cd = d.universe_cd
+     AND d.universe_id = p.universe_id
+     AND p.universe_dt = @BDATE
+     AND #POSITION.security_id = p.security_id
+END
 
 UPDATE #POSITION
    SET bmk_wgt = 0.0
@@ -110,7 +127,7 @@ UPDATE #POSITION
 IF @DEBUG = 1
 BEGIN
   SELECT '#POSITION'
-  SELECT * FROM #POSITION ORDER BY cusip, sedol
+  SELECT * FROM #POSITION ORDER BY security_id
 END
 
 DECLARE @PREV_BDATE datetime
@@ -147,33 +164,33 @@ SELECT @PREV_BDATE AS [From],
        @BDATE AS [To]
 
 CREATE TABLE #RESULT (
-  mqa_id		varchar(32)	NULL,
-  ticker		varchar(16)	NULL,
-  cusip			varchar(32)	NULL,
-  sedol			varchar(32)	NULL,
-  isin			varchar(64)	NULL,
+  security_id	int				NULL,
+  ticker		varchar(16)		NULL,
+  cusip			varchar(32)		NULL,
+  sedol			varchar(32)		NULL,
+  isin			varchar(64)		NULL,
   imnt_nm		varchar(255)	NULL,
 
-  country_cd		varchar(4)	NULL,
-  country_nm		varchar(128)	NULL,
-  sector_id		int		NULL,
-  sector_nm		varchar(64)	NULL,
-  segment_id		int		NULL,
-  segment_nm		varchar(128)	NULL,
+  country_cd	varchar(4)		NULL,
+  country_nm	varchar(128)	NULL,
+  sector_id		int				NULL,
+  sector_nm		varchar(64)		NULL,
+  segment_id	int				NULL,
+  segment_nm	varchar(128)	NULL,
 
-  acct_bmk_wgt		float		NULL,
+  acct_bmk_wgt	float			NULL,
 
-  curr_total_score	float		NULL,
-  prev_total_score	float		NULL,
-  change_total_score	float		NULL
+  curr_total_score		float	NULL,
+  prev_total_score		float	NULL,
+  change_total_score	float	NULL
 )
 
 DECLARE @UNIVERSE_ID int
 
 IF @REPORT_VIEW = 'RANKS'
 BEGIN
-  INSERT #RESULT (mqa_id, ticker, cusip, sedol, isin)
-  SELECT p.mqa_id, p.ticker, p.cusip, p.sedol, p.isin
+  INSERT #RESULT (security_id)
+  SELECT p.security_id
     FROM strategy g, universe_makeup p
    WHERE g.strategy_id = @STRATEGY_ID
      AND p.universe_dt = @BDATE
@@ -184,19 +201,19 @@ BEGIN
     FROM scores s
    WHERE s.bdate = @BDATE
      AND s.strategy_id = @STRATEGY_ID
-     AND #RESULT.cusip = s.cusip
+     AND #RESULT.security_id = s.security_id
 
   UPDATE #RESULT
      SET prev_total_score = s.total_score
     FROM scores s
    WHERE s.bdate = @PREV_BDATE
      AND s.strategy_id = @STRATEGY_ID
-     AND #RESULT.cusip = s.cusip
+     AND #RESULT.security_id = s.security_id
 
   IF @DEBUG = 1
   BEGIN
     SELECT '#RESULT: RANKS (1)'
-    SELECT * FROM #RESULT ORDER BY cusip, sedol
+    SELECT * FROM #RESULT ORDER BY security_id
   END
 
   DELETE #RESULT WHERE prev_total_score IS NULL
@@ -207,7 +224,7 @@ BEGIN
   IF @DEBUG = 1
   BEGIN
     SELECT '#RESULT: RANKS (2)'
-    SELECT * FROM #RESULT ORDER BY cusip, sedol
+    SELECT * FROM #RESULT ORDER BY security_id
   END
 
   IF @SCORE_CHANGE_MIN IS NULL
@@ -222,7 +239,7 @@ BEGIN
   IF @DEBUG = 1
   BEGIN
     SELECT '#RESULT: RANKS (3)'
-    SELECT * FROM #RESULT ORDER BY cusip, sedol
+    SELECT * FROM #RESULT ORDER BY security_id
   END
 END
 ELSE IF @REPORT_VIEW IN ('MODEL', 'UNIVERSE')
@@ -245,34 +262,34 @@ BEGIN
   IF @DEBUG = 1
     BEGIN SELECT '@UNIVERSE_ID', @UNIVERSE_ID END
 
-  INSERT #RESULT (mqa_id, ticker, cusip, sedol, isin)
-  SELECT mqa_id, ticker, cusip, sedol, isin
+  INSERT #RESULT (security_id)
+  SELECT security_id
     FROM universe_makeup
    WHERE universe_dt = @BDATE
      AND universe_id = @UNIVERSE_ID
-     AND cusip NOT IN (SELECT cusip FROM universe_makeup
-                        WHERE universe_dt = @PREV_BDATE
-                          AND universe_id = @UNIVERSE_ID)
+     AND security_id NOT IN (SELECT security_id FROM universe_makeup
+                              WHERE universe_dt = @PREV_BDATE
+                                AND universe_id = @UNIVERSE_ID)
 
   IF @DEBUG = 1
   BEGIN
     SELECT '#RESULT: MODEL OR UNIVERSE (1)'
-    SELECT * FROM #RESULT ORDER BY cusip, sedol
+    SELECT * FROM #RESULT ORDER BY security_id
   END
 
-  INSERT #RESULT (mqa_id, ticker, cusip, sedol, isin)
-  SELECT mqa_id, ticker, cusip, sedol, isin
+  INSERT #RESULT (security_id)
+  SELECT security_id
     FROM universe_makeup
    WHERE universe_dt = @PREV_BDATE
      AND universe_id = @UNIVERSE_ID
-     AND cusip NOT IN (SELECT cusip FROM universe_makeup
-                        WHERE universe_dt = @BDATE
-                          AND universe_id = @UNIVERSE_ID)
+     AND security_id NOT IN (SELECT security_id FROM universe_makeup
+                              WHERE universe_dt = @BDATE
+                                AND universe_id = @UNIVERSE_ID)
 
   IF @DEBUG = 1
   BEGIN
     SELECT '#RESULT: MODEL OR UNIVERSE (2)'
-    SELECT * FROM #RESULT ORDER BY cusip, sedol
+    SELECT * FROM #RESULT ORDER BY security_id
   END
 
   UPDATE #RESULT
@@ -280,14 +297,14 @@ BEGIN
     FROM scores s
    WHERE s.bdate = @BDATE
      AND s.strategy_id = @STRATEGY_ID
-     AND #RESULT.cusip = s.cusip
+     AND #RESULT.security_id = s.security_id
 
   UPDATE #RESULT
      SET prev_total_score = s.total_score
     FROM scores s
    WHERE s.bdate = @PREV_BDATE
      AND s.strategy_id = @STRATEGY_ID
-     AND #RESULT.cusip = s.cusip
+     AND #RESULT.security_id = s.security_id
 
   UPDATE #RESULT
      SET change_total_score = curr_total_score - prev_total_score
@@ -295,22 +312,24 @@ BEGIN
   IF @DEBUG = 1
   BEGIN
     SELECT '#RESULT: MODEL OR UNIVERSE (3)'
-    SELECT * FROM #RESULT ORDER BY cusip, sedol
+    SELECT * FROM #RESULT ORDER BY security_id
   END
 END
 
 UPDATE #RESULT
-   SET imnt_nm = i.imnt_nm,
-       country_cd = i.country
-  FROM instrument_characteristics i
- WHERE i.bdate = @BDATE
-   AND #RESULT.cusip = i.cusip
+   SET ticker = y.ticker,
+       cusip = y.cusip,
+       sedol = y.sedol,
+       isin = y.isin,
+       imnt_nm = y.security_name,
+       country_cd = y.issue_country_cd
+  FROM equity_common..security y
+ WHERE #RESULT.security_id = y.security_id
 
 UPDATE #RESULT
-   SET country_nm = d.decode
-  FROM decode d
- WHERE d.item = 'COUNTRY'
-   AND #RESULT.country_cd = d.code
+   SET country_nm = UPPER(c.country_name)
+  FROM equity_common..country c
+ WHERE #RESULT.country_cd = c.country_cd
 
 UPDATE #RESULT
    SET sector_id = ss.sector_id,
@@ -320,7 +339,7 @@ UPDATE #RESULT
    AND g.factor_model_id = f.factor_model_id
    AND ss.bdate = @BDATE
    AND ss.sector_model_id = f.sector_model_id
-   AND #RESULT.cusip = ss.cusip
+   AND #RESULT.security_id = ss.security_id
 
 UPDATE #RESULT
    SET sector_nm = d.sector_nm
@@ -335,17 +354,37 @@ UPDATE #RESULT
 UPDATE #RESULT
    SET acct_bmk_wgt = p.weight - p.bmk_wgt
   FROM #POSITION p
- WHERE #RESULT.cusip = p.cusip
+ WHERE #RESULT.security_id = p.security_id
 
-UPDATE #RESULT
-   SET acct_bmk_wgt = (p.weight / 100.0) * -1.0
-  FROM account a, universe_makeup p
- WHERE a.strategy_id = @STRATEGY_ID
-   AND a.account_cd = @ACCOUNT_CD
-   AND p.universe_dt = @BDATE
-   AND p.universe_id = a.bm_universe_id
-   AND #RESULT.cusip = p.cusip
-   AND #RESULT.acct_bmk_wgt IS NULL
+IF EXISTS (SELECT 1 FROM account a, benchmark b
+            WHERE a.strategy_id = @STRATEGY_ID
+              AND a.account_cd = @ACCOUNT_CD
+              AND a.benchmark_cd = b.benchmark_cd)
+BEGIN
+  UPDATE #RESULT
+     SET acct_bmk_wgt = bw.weight * -1.0
+    FROM account a, equity_common..benchmark_weight bw
+  WHERE a.strategy_id = @STRATEGY_ID
+     AND a.account_cd = @ACCOUNT_CD
+     AND bw.reference_date = @BDATE
+     AND bw.reference_date = bw.effective_date
+     AND bw.acct_cd = a.benchmark_cd
+     AND #RESULT.security_id = bw.security_id
+     AND #RESULT.acct_bmk_wgt IS NULL
+END
+ELSE
+BEGIN
+  UPDATE #RESULT
+     SET acct_bmk_wgt = (p.weight / 100.0) * -1.0
+    FROM account a, universe_def d, universe_makeup p
+   WHERE a.strategy_id = @STRATEGY_ID
+     AND a.account_cd = @ACCOUNT_CD
+     AND a.benchmark_cd = d.universe_cd
+     AND d.universe_id = p.universe_id
+     AND p.universe_dt = @BDATE
+     AND #RESULT.security_id = p.security_id
+     AND #RESULT.acct_bmk_wgt IS NULL
+END
 
 UPDATE #RESULT
    SET acct_bmk_wgt = 0.0
@@ -359,160 +398,99 @@ BEGIN
   SELECT * FROM #RESULT ORDER BY change_total_score DESC, curr_total_score DESC
 END
 
+DECLARE @SQL varchar(1500),
+        @SQL2 varchar(1500)
+
+SELECT @SQL = 'SELECT ticker AS [Ticker], '
+SELECT @SQL = @SQL + 'cusip AS [CUSIP], '
+SELECT @SQL = @SQL + 'sedol AS [SEDOL], '
+SELECT @SQL = @SQL + 'isin AS [ISIN], '
+SELECT @SQL = @SQL + 'imnt_nm AS [Name], '
+SELECT @SQL = @SQL + 'country_nm AS [Country Name], '
+SELECT @SQL = @SQL + 'ISNULL(sector_nm, ''UNKNOWN'') AS [Sector Name], '
+SELECT @SQL = @SQL + 'ISNULL(segment_nm, ''UNKNOWN'') AS [Segment Name], '
+SELECT @SQL = @SQL + 'acct_bmk_wgt AS [Acct-Bmk Wgt], '
+SELECT @SQL = @SQL + 'curr_total_score AS [Current], '
+SELECT @SQL = @SQL + 'prev_total_score AS [Previous], '
+SELECT @SQL = @SQL + 'change_total_score AS [Change] '
+SELECT @SQL = @SQL + 'FROM #RESULT '
+SELECT @SQL2 = @SQL
+
+IF @REPORT_VIEW = 'RANKS'
+BEGIN
+  IF EXISTS (SELECT * FROM strategy WHERE strategy_id = @STRATEGY_ID AND rank_order = 1)
+  BEGIN
+    SELECT @SQL = @SQL + 'WHERE change_total_score >= 0.0 '
+    SELECT @SQL = @SQL + 'ORDER BY change_total_score DESC, cusip, sedol'
+
+    SELECT @SQL2 = @SQL2 + 'WHERE change_total_score < 0.0 '
+    SELECT @SQL2 = @SQL2 + 'ORDER BY change_total_score, cusip, sedol'
+  END
+  ELSE
+  BEGIN
+    SELECT @SQL = @SQL + 'WHERE change_total_score < 0.0 '
+    SELECT @SQL = @SQL + 'ORDER BY change_total_score, cusip, sedol'
+
+    SELECT @SQL2 = @SQL2 + 'WHERE change_total_score >= 0.0 '
+    SELECT @SQL2 = @SQL2 + 'ORDER BY change_total_score DESC, cusip, sedol'
+  END
+END
+ELSE IF @REPORT_VIEW = 'MODEL'
+BEGIN
+  IF EXISTS (SELECT * FROM strategy WHERE strategy_id = @STRATEGY_ID AND rank_order = 1)
+  BEGIN
+    SELECT @SQL = @SQL + 'WHERE change_total_score >= 0.0 '
+    SELECT @SQL = @SQL + 'OR (change_total_score IS NULL AND curr_total_score IS NOT NULL) '
+    SELECT @SQL = @SQL + 'ORDER BY curr_total_score DESC, change_total_score DESC, cusip, sedol'
+
+    SELECT @SQL2 = @SQL2 + 'WHERE change_total_score < 0.0 '
+    SELECT @SQL2 = @SQL2 + 'OR (change_total_score IS NULL AND curr_total_score IS NULL) '
+    SELECT @SQL2 = @SQL2 + 'ORDER BY prev_total_score DESC, change_total_score, cusip, sedol'
+  END
+  ELSE
+  BEGIN
+    SELECT @SQL = @SQL + 'WHERE change_total_score < 0.0 '
+    SELECT @SQL = @SQL + 'OR (change_total_score IS NULL AND curr_total_score IS NULL) '
+    SELECT @SQL = @SQL + 'ORDER BY prev_total_score DESC, change_total_score, cusip, sedol'
+
+    SELECT @SQL2 = @SQL2 + 'WHERE change_total_score >= 0.0 '
+    SELECT @SQL2 = @SQL2 + 'OR (change_total_score IS NULL AND curr_total_score IS NOT NULL) '
+    SELECT @SQL2 = @SQL2 + 'ORDER BY curr_total_score DESC, change_total_score DESC, cusip, sedol'
+  END
+END
+ELSE IF @REPORT_VIEW = 'UNIVERSE'
+BEGIN
+  SELECT @SQL = @SQL + 'WHERE curr_total_score IS NOT NULL '
+  SELECT @SQL2 = @SQL2 + 'WHERE curr_total_score IS NULL '
+
+  IF EXISTS (SELECT * FROM strategy WHERE strategy_id = @STRATEGY_ID AND rank_order = 1)
+  BEGIN
+     SELECT @SQL = @SQL + 'ORDER BY curr_total_score DESC'
+     SELECT @SQL2 = @SQL2 + 'ORDER BY prev_total_score DESC'
+  END
+  ELSE
+  BEGIN
+     SELECT @SQL = @SQL + 'ORDER BY curr_total_score'
+     SELECT @SQL2 = @SQL2 + 'ORDER BY prev_total_score'
+  END
+END
+
+IF @DEBUG = 1
+BEGIN
+  SELECT '@SQL', @SQL
+  SELECT '@SQL2', @SQL2
+END
+
+EXEC(@SQL)
+EXEC(@SQL2)
+
 IF @REPORT_VIEW IN ('RANKS', 'MODEL')
 BEGIN
-  IF @REPORT_VIEW = 'RANKS'
-  BEGIN
-    IF EXISTS (SELECT * FROM strategy WHERE strategy_id = @STRATEGY_ID AND rank_order = 1)
-    BEGIN
-      SELECT ticker		AS [Ticker],
-             cusip		AS [CUSIP],
-             sedol		AS [SEDOL],
-             isin			AS [ISIN],
-             imnt_nm		AS [Name],
-             country_nm		AS [Country Name],
-             ISNULL(sector_nm, 'UNKNOWN') AS [Sector Name],
-             ISNULL(segment_nm, 'UNKNOWN') AS [Segment Name],
-             acct_bmk_wgt		AS [Acct-Bmk Wgt],
-             curr_total_score	AS [Current],
-             prev_total_score	AS [Previous],
-             change_total_score	AS [Change]
-        FROM #RESULT
-       WHERE change_total_score >= 0.0
-       ORDER BY change_total_score DESC, cusip, sedol
-
-      SELECT ticker		AS [Ticker],
-             cusip		AS [CUSIP],
-             sedol		AS [SEDOL],
-             isin			AS [ISIN],
-             imnt_nm		AS [Name],
-             country_nm		AS [Country Name],
-             ISNULL(sector_nm, 'UNKNOWN') AS [Sector Name],
-             ISNULL(segment_nm, 'UNKNOWN') AS [Segment Name],
-             acct_bmk_wgt		AS [Acct-Bmk Wgt],
-             curr_total_score	AS [Current],
-             prev_total_score	AS [Previous],
-             change_total_score	AS [Change]
-        FROM #RESULT
-       WHERE change_total_score < 0.0
-       ORDER BY change_total_score, cusip, sedol
-    END
-    ELSE
-    BEGIN
-      SELECT ticker		AS [Ticker],
-             cusip		AS [CUSIP],
-             sedol		AS [SEDOL],
-             isin			AS [ISIN],
-             imnt_nm		AS [Name],
-             country_nm		AS [Country Name],
-             ISNULL(sector_nm, 'UNKNOWN') AS [Sector Name],
-             ISNULL(segment_nm, 'UNKNOWN') AS [Segment Name],
-             acct_bmk_wgt		AS [Acct-Bmk Wgt],
-             curr_total_score	AS [Current],
-             prev_total_score	AS [Previous],
-             change_total_score	AS [Change]
-        FROM #RESULT
-       WHERE change_total_score < 0.0
-       ORDER BY change_total_score, cusip, sedol
-
-      SELECT ticker		AS [Ticker],
-             cusip		AS [CUSIP],
-             sedol		AS [SEDOL],
-             isin			AS [ISIN],
-             imnt_nm		AS [Name],
-             country_nm		AS [Country Name],
-             ISNULL(sector_nm, 'UNKNOWN') AS [Sector Name],
-             ISNULL(segment_nm, 'UNKNOWN') AS [Segment Name],
-             acct_bmk_wgt		AS [Acct-Bmk Wgt],
-             curr_total_score	AS [Current],
-             prev_total_score	AS [Previous],
-             change_total_score	AS [Change]
-        FROM #RESULT
-       WHERE change_total_score >= 0.0
-       ORDER BY change_total_score DESC, cusip, sedol
-    END
-  END
-  ELSE IF @REPORT_VIEW = 'MODEL'
-  BEGIN
-    IF EXISTS (SELECT * FROM strategy WHERE strategy_id = @STRATEGY_ID AND rank_order = 1)
-    BEGIN
-      SELECT ticker		AS [Ticker],
-             cusip		AS [CUSIP],
-             sedol		AS [SEDOL],
-             isin			AS [ISIN],
-             imnt_nm		AS [Name],
-             country_nm		AS [Country Name],
-             ISNULL(sector_nm, 'UNKNOWN') AS [Sector Name],
-             ISNULL(segment_nm, 'UNKNOWN') AS [Segment Name],
-             acct_bmk_wgt		AS [Acct-Bmk Wgt],
-             curr_total_score	AS [Current],
-             prev_total_score	AS [Previous],
-             change_total_score	AS [Change]
-        FROM #RESULT
-       WHERE change_total_score >= 0.0
-          OR (change_total_score IS NULL AND curr_total_score IS NOT NULL)
-       ORDER BY curr_total_score DESC, change_total_score DESC, cusip, sedol
-
-      SELECT ticker		AS [Ticker],
-             cusip		AS [CUSIP],
-             sedol		AS [SEDOL],
-             isin			AS [ISIN],
-             imnt_nm		AS [Name],
-             country_nm		AS [Country Name],
-             ISNULL(sector_nm, 'UNKNOWN') AS [Sector Name],
-             ISNULL(segment_nm, 'UNKNOWN') AS [Segment Name],
-             acct_bmk_wgt		AS [Acct-Bmk Wgt],
-             curr_total_score	AS [Current],
-             prev_total_score	AS [Previous],
-             change_total_score	AS [Change]
-        FROM #RESULT
-       WHERE change_total_score < 0.0
-          OR (change_total_score IS NULL AND curr_total_score IS NULL)
-       ORDER BY prev_total_score DESC, change_total_score, cusip, sedol
-    END
-    ELSE
-    BEGIN
-      SELECT ticker		AS [Ticker],
-             cusip		AS [CUSIP],
-             sedol		AS [SEDOL],
-             isin			AS [ISIN],
-             imnt_nm		AS [Name],
-             country_nm		AS [Country Name],
-             ISNULL(sector_nm, 'UNKNOWN') AS [Sector Name],
-             ISNULL(segment_nm, 'UNKNOWN') AS [Segment Name],
-             acct_bmk_wgt		AS [Acct-Bmk Wgt],
-             curr_total_score	AS [Current],
-             prev_total_score	AS [Previous],
-             change_total_score	AS [Change]
-        FROM #RESULT
-       WHERE change_total_score < 0.0
-          OR (change_total_score IS NULL AND curr_total_score IS NOT NULL)
-       ORDER BY prev_total_score DESC, change_total_score, cusip, sedol
-
-      SELECT ticker		AS [Ticker],
-             cusip		AS [CUSIP],
-             sedol		AS [SEDOL],
-             isin			AS [ISIN],
-             imnt_nm		AS [Name],
-             country_nm		AS [Country Name],
-             ISNULL(sector_nm, 'UNKNOWN') AS [Sector Name],
-             ISNULL(segment_nm, 'UNKNOWN') AS [Segment Name],
-             acct_bmk_wgt		AS [Acct-Bmk Wgt],
-             curr_total_score	AS [Current],
-             prev_total_score	AS [Previous],
-             change_total_score	AS [Change]
-        FROM #RESULT
-       WHERE change_total_score >= 0.0
-          OR (change_total_score IS NULL AND curr_total_score IS NULL)
-       ORDER BY curr_total_score DESC, change_total_score DESC, cusip, sedol
-    END
-  END
-
   CREATE TABLE #RANK_PARAMS (
-    factor_id	int		NULL,
-    against	varchar(1)	NULL,
-    against_id	int		NULL,
-    weight	float		NULL
+    factor_id	int			NULL,
+    against		varchar(1)	NULL,
+    against_id	int			NULL,
+    weight		float		NULL
   )
 
   INSERT #RANK_PARAMS
@@ -545,20 +523,16 @@ BEGIN
   END
 
   CREATE TABLE #RESULT2 (
-    mqa_id		varchar(32)	NULL,
-    ticker		varchar(16)	NULL,
-    cusip		varchar(32)	NULL,
-    sedol		varchar(32)	NULL,
-    isin		varchar(64)	NULL,
+    security_id		int		NULL,
 
-    factor_id		int		NULL,
-    factor_cd		varchar(32)	NULL,
-    factor_short_nm	varchar(64)	NULL,
+    factor_id		int				NULL,
+    factor_cd		varchar(32)		NULL,
+    factor_short_nm	varchar(64)		NULL,
     factor_nm		varchar(255)	NULL,
 
-    against		varchar(1)	NULL,
-    against_id		int		NULL,
-    weight		float		NULL,
+    against			varchar(1)	NULL,
+    against_id		int			NULL,
+    weight			float		NULL,
 
     curr_rank		int		NULL,
     prev_rank		int		NULL,
@@ -570,8 +544,8 @@ BEGIN
    WHERE strategy_id = @STRATEGY_ID
 
   INSERT #RESULT2
-        (mqa_id, ticker, cusip, sedol, isin, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight, curr_rank)
-  SELECT r.mqa_id, r.ticker, r.cusip, r.sedol, r.isin, f.factor_id, f.factor_cd, f.factor_short_nm, f.factor_nm, p.against, p.against_id, p.weight, o.rank
+        (security_id, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight, curr_rank)
+  SELECT r.security_id, f.factor_id, f.factor_cd, f.factor_short_nm, f.factor_nm, p.against, p.against_id, p.weight, o.rank
     FROM #RANK_PARAMS p, #RESULT r, rank_inputs i, rank_output o, factor f
    WHERE i.bdate = @BDATE
      AND i.universe_id = @UNIVERSE_ID
@@ -580,11 +554,11 @@ BEGIN
      AND i.against = p.against
      AND i.against = 'U'
      AND i.rank_event_id = o.rank_event_id
-     AND r.cusip = o.cusip
+     AND r.security_id = o.security_id
 
   INSERT #RESULT2
-        (mqa_id, ticker, cusip, sedol, isin, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight, curr_rank)
-  SELECT r.mqa_id, r.ticker, r.cusip, r.sedol, r.isin, f.factor_id, f.factor_cd, f.factor_short_nm, f.factor_nm, p.against, p.against_id, p.weight, o.rank
+        (security_id, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight, curr_rank)
+  SELECT r.security_id, f.factor_id, f.factor_cd, f.factor_short_nm, f.factor_nm, p.against, p.against_id, p.weight, o.rank
     FROM #RANK_PARAMS p, #RESULT r, rank_inputs i, rank_output o, factor f
    WHERE i.bdate = @BDATE
      AND i.universe_id = @UNIVERSE_ID
@@ -594,11 +568,11 @@ BEGIN
      AND i.against = 'C'
      AND i.against_id = p.against_id
      AND i.rank_event_id = o.rank_event_id
-     AND r.cusip = o.cusip
+     AND r.security_id = o.security_id
 
   INSERT #RESULT2
-        (mqa_id, ticker, cusip, sedol, isin, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight, curr_rank)
-  SELECT r.mqa_id, r.ticker, r.cusip, r.sedol, r.isin, f.factor_id, f.factor_cd, f.factor_short_nm, f.factor_nm, p.against, p.against_id, p.weight, o.rank
+        (security_id, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight, curr_rank)
+  SELECT r.security_id, f.factor_id, f.factor_cd, f.factor_short_nm, f.factor_nm, p.against, p.against_id, p.weight, o.rank
     FROM #RANK_PARAMS p, #RESULT r, rank_inputs i, rank_output o, factor f
    WHERE i.bdate = @BDATE
      AND i.universe_id = @UNIVERSE_ID
@@ -608,12 +582,12 @@ BEGIN
      AND i.against = 'G'
      AND i.against_id = p.against_id
      AND i.rank_event_id = o.rank_event_id
-     AND r.cusip = o.cusip
+     AND r.security_id = o.security_id
 
   IF @DEBUG = 1
   BEGIN
     SELECT '#RESULT2 (1)'
-    SELECT * FROM #RESULT2 ORDER BY cusip, sedol, against, factor_id
+    SELECT * FROM #RESULT2 ORDER BY security_id, against, factor_id
   END
 
   UPDATE #RESULT2
@@ -625,7 +599,7 @@ BEGIN
      AND i.against = #RESULT2.against
      AND i.against = 'U'
      AND i.rank_event_id = o.rank_event_id
-     AND #RESULT2.cusip = o.cusip
+     AND #RESULT2.security_id = o.security_id
 
   UPDATE #RESULT2
      SET prev_rank = o.rank
@@ -637,7 +611,7 @@ BEGIN
      AND i.against = 'C'
      AND i.against_id = #RESULT2.against_id
      AND i.rank_event_id = o.rank_event_id
-     AND #RESULT2.cusip = o.cusip
+     AND #RESULT2.security_id = o.security_id
 
   UPDATE #RESULT2
      SET prev_rank = o.rank
@@ -649,17 +623,17 @@ BEGIN
      AND i.against = 'G'
      AND i.against_id = #RESULT2.against_id
      AND i.rank_event_id = o.rank_event_id
-     AND #RESULT2.cusip = o.cusip
+     AND #RESULT2.security_id = o.security_id
 
   IF @DEBUG = 1
   BEGIN
     SELECT '#RESULT2 (2)'
-    SELECT * FROM #RESULT2 ORDER BY cusip, sedol, against, factor_id
+    SELECT * FROM #RESULT2 ORDER BY security_id, against, factor_id
   END
 
   INSERT #RESULT2
-        (mqa_id, ticker, cusip, sedol, isin, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight, prev_rank)
-  SELECT r.mqa_id, r.ticker, r.cusip, r.sedol, r.isin, f.factor_id, f.factor_cd, f.factor_short_nm, f.factor_nm, p.against, p.against_id, p.weight, o.rank
+        (security_id, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight, prev_rank)
+  SELECT r.security_id, f.factor_id, f.factor_cd, f.factor_short_nm, f.factor_nm, p.against, p.against_id, p.weight, o.rank
     FROM #RANK_PARAMS p, #RESULT r, rank_inputs i, rank_output o, factor f
    WHERE i.bdate = @PREV_BDATE
      AND i.universe_id = @UNIVERSE_ID
@@ -668,12 +642,12 @@ BEGIN
      AND i.against = p.against
      AND i.against = 'U'
      AND i.rank_event_id = o.rank_event_id
-     AND r.cusip = o.cusip
-     AND r.cusip NOT IN (SELECT DISTINCT cusip FROM #RESULT2 WHERE curr_rank IS NOT NULL)
+     AND r.security_id = o.security_id
+     AND r.security_id NOT IN (SELECT security_id FROM #RESULT2 WHERE curr_rank IS NOT NULL)
 
   INSERT #RESULT2
-        (mqa_id, ticker, cusip, sedol, isin, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight, prev_rank)
-  SELECT r.mqa_id, r.ticker, r.cusip, r.sedol, r.isin, f.factor_id, f.factor_cd, f.factor_short_nm, f.factor_nm, p.against, p.against_id, p.weight, o.rank
+        (security_id, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight, prev_rank)
+  SELECT r.security_id, f.factor_id, f.factor_cd, f.factor_short_nm, f.factor_nm, p.against, p.against_id, p.weight, o.rank
     FROM #RANK_PARAMS p, #RESULT r, rank_inputs i, rank_output o, factor f
    WHERE i.bdate = @PREV_BDATE
      AND i.universe_id = @UNIVERSE_ID
@@ -683,12 +657,12 @@ BEGIN
      AND i.against = 'C'
      AND i.against_id = p.against_id
      AND i.rank_event_id = o.rank_event_id
-     AND r.cusip = o.cusip
-     AND r.cusip NOT IN (SELECT DISTINCT cusip FROM #RESULT2 WHERE curr_rank IS NOT NULL)
+     AND r.security_id = o.security_id
+     AND r.security_id NOT IN (SELECT security_id FROM #RESULT2 WHERE curr_rank IS NOT NULL)
 
   INSERT #RESULT2
-        (mqa_id, ticker, cusip, sedol, isin, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight, prev_rank)
-  SELECT r.mqa_id, r.ticker, r.cusip, r.sedol, r.isin, f.factor_id, f.factor_cd, f.factor_short_nm, f.factor_nm, p.against, p.against_id, p.weight, o.rank
+        (security_id, factor_id, factor_cd, factor_short_nm, factor_nm, against, against_id, weight, prev_rank)
+  SELECT r.security_id, f.factor_id, f.factor_cd, f.factor_short_nm, f.factor_nm, p.against, p.against_id, p.weight, o.rank
     FROM #RANK_PARAMS p, #RESULT r, rank_inputs i, rank_output o, factor f
    WHERE i.bdate = @PREV_BDATE
      AND i.universe_id = @UNIVERSE_ID
@@ -698,13 +672,13 @@ BEGIN
      AND i.against = 'G'
      AND i.against_id = p.against_id
      AND i.rank_event_id = o.rank_event_id
-     AND r.cusip = o.cusip
-     AND r.cusip NOT IN (SELECT DISTINCT cusip FROM #RESULT2 WHERE curr_rank IS NOT NULL)
+     AND r.security_id = o.security_id
+     AND r.security_id NOT IN (SELECT security_id FROM #RESULT2 WHERE curr_rank IS NOT NULL)
 
   IF @DEBUG = 1
   BEGIN
     SELECT '#RESULT2 (3)'
-    SELECT * FROM #RESULT2 ORDER BY cusip, sedol, against, factor_id
+    SELECT * FROM #RESULT2 ORDER BY security_id, against, factor_id
   END
 
   --OVERRIDE WEIGHT LOGIC: BEGIN
@@ -718,7 +692,7 @@ BEGIN
      AND #RESULT2.against = 'U'
      AND o.level_type = 'G'
      AND o.level_id = r.segment_id
-     and #RESULT2.cusip = r.cusip
+     and #RESULT2.security_id = r.security_id
   UPDATE #RESULT2
      SET weight = o.override_wgt
     FROM #RESULT r, strategy g, factor_against_weight_override o
@@ -730,7 +704,7 @@ BEGIN
      AND (r.sector_id = o.against_id OR (r.sector_id IS NULL AND o.against_id IS NULL))
      AND o.level_type = 'G'
      AND o.level_id = r.segment_id
-     AND #RESULT2.cusip = r.cusip
+     AND #RESULT2.security_id = r.security_id
   UPDATE #RESULT2
      SET weight = o.override_wgt
     FROM #RESULT r, strategy g, factor_against_weight_override o
@@ -742,7 +716,7 @@ BEGIN
      AND (r.segment_id = o.against_id OR (r.segment_id IS NULL AND o.against_id IS NULL))
      AND o.level_type = 'G'
      AND o.level_id = r.segment_id
-     AND #RESULT2.cusip = r.cusip
+     AND #RESULT2.security_id = r.security_id
 
   UPDATE #RESULT2
      SET weight = o.override_wgt
@@ -754,7 +728,7 @@ BEGIN
      AND #RESULT2.against = 'U'
      AND o.level_type = 'C'
      AND o.level_id = r.sector_id
-     and #RESULT2.cusip = r.cusip
+     and #RESULT2.security_id = r.security_id
   UPDATE #RESULT2
      SET weight = o.override_wgt
     FROM #RESULT r, strategy g, factor_against_weight_override o
@@ -766,7 +740,7 @@ BEGIN
      AND (r.sector_id = o.against_id OR (r.sector_id IS NULL AND o.against_id IS NULL))
      AND o.level_type = 'C'
      AND o.level_id = r.sector_id
-     AND #RESULT2.cusip = r.cusip
+     AND #RESULT2.security_id = r.security_id
   UPDATE #RESULT2
      SET weight = o.override_wgt
     FROM #RESULT r, strategy g, factor_against_weight_override o
@@ -778,7 +752,7 @@ BEGIN
      AND (r.segment_id = o.against_id OR (r.segment_id IS NULL AND o.against_id IS NULL))
      AND o.level_type = 'C'
      AND o.level_id = r.sector_id
-     AND #RESULT2.cusip = r.cusip
+     AND #RESULT2.security_id = r.security_id
 
   UPDATE #RESULT2
      SET weight = o.override_wgt
@@ -789,7 +763,7 @@ BEGIN
      AND #RESULT2.against = o.against
      AND #RESULT2.against = 'U'
      AND o.level_type = 'U'
-     and #RESULT2.cusip = r.cusip
+     and #RESULT2.security_id = r.security_id
   UPDATE #RESULT2
      SET weight = o.override_wgt
     FROM #RESULT r, strategy g, factor_against_weight_override o
@@ -800,7 +774,7 @@ BEGIN
      AND #RESULT2.against = 'C'
      AND (r.sector_id = o.against_id OR (r.sector_id IS NULL AND o.against_id IS NULL))
      AND o.level_type = 'U'
-     AND #RESULT2.cusip = r.cusip
+     AND #RESULT2.security_id = r.security_id
   UPDATE #RESULT2
      SET weight = o.override_wgt
     FROM #RESULT r, strategy g, factor_against_weight_override o
@@ -811,13 +785,13 @@ BEGIN
      AND #RESULT2.against = 'G'
      AND (r.segment_id = o.against_id OR (r.segment_id IS NULL AND o.against_id IS NULL))
      AND o.level_type = 'U'
-     AND #RESULT2.cusip = r.cusip
+     AND #RESULT2.security_id = r.security_id
   --OVERRIDE WEIGHT LOGIC: END
 
   IF @DEBUG = 1
   BEGIN
     SELECT '#RESULT2 (4): AFTER OVERRIDE WEIGHT UPDATE'
-    SELECT * FROM #RESULT2 ORDER BY cusip, sedol, against, factor_id
+    SELECT * FROM #RESULT2 ORDER BY security_id, against, factor_id
   END
 
   DELETE #RESULT2 WHERE weight = 0.0
@@ -827,7 +801,7 @@ BEGIN
     FROM #RESULT r, strategy g, factor_model_weights w
    WHERE g.strategy_id = @STRATEGY_ID
      AND g.factor_model_id = w.factor_model_id
-     AND #RESULT2.cusip = r.cusip
+     AND #RESULT2.security_id = r.security_id
      AND (r.sector_id = w.sector_id OR (r.sector_id IS NULL AND w.sector_id IS NULL))
      AND (r.segment_id = w.segment_id OR (r.segment_id IS NULL AND w.segment_id IS NULL))
      AND #RESULT2.against = 'G'
@@ -836,7 +810,7 @@ BEGIN
     FROM #RESULT r, strategy g, factor_model_weights w
    WHERE g.strategy_id = @STRATEGY_ID
      AND g.factor_model_id = w.factor_model_id
-     AND #RESULT2.cusip = r.cusip
+     AND #RESULT2.security_id = r.security_id
      AND (r.sector_id = w.sector_id OR (r.sector_id IS NULL AND w.sector_id IS NULL))
      AND (r.segment_id = w.segment_id OR (r.segment_id IS NULL AND w.segment_id IS NULL))
      AND #RESULT2.against = 'C'
@@ -845,7 +819,7 @@ BEGIN
     FROM #RESULT r, strategy g, factor_model_weights w
    WHERE g.strategy_id = @STRATEGY_ID
      AND g.factor_model_id = w.factor_model_id
-     AND #RESULT2.cusip = r.cusip
+     AND #RESULT2.security_id = r.security_id
      AND (r.sector_id = w.sector_id OR (r.sector_id IS NULL AND w.sector_id IS NULL))
      AND (r.segment_id = w.segment_id OR (r.segment_id IS NULL AND w.segment_id IS NULL))
      AND #RESULT2.against = 'U'
@@ -856,120 +830,36 @@ BEGIN
   IF @DEBUG = 1
   BEGIN
     SELECT '#RESULT2 (5)'
-    SELECT * FROM #RESULT2 ORDER BY cusip, sedol, against, factor_id
+    SELECT * FROM #RESULT2 ORDER BY security_id, against, factor_id
   END
 
+  SELECT @SQL = 'SELECT r.ticker AS [Ticker], '
+  SELECT @SQL = @SQL + 'r.cusip AS [CUSIP], '
+  SELECT @SQL = @SQL + 'r.sedol AS [SEDOL], '
+  SELECT @SQL = @SQL + 'r.isin AS [ISIN], '
+  SELECT @SQL = @SQL + 'r2.factor_short_nm AS [Factor], '
+  SELECT @SQL = @SQL + 'r2.factor_nm AS [Factor Name], '
+  SELECT @SQL = @SQL + 'CASE r2.against WHEN ''U'' THEN ''UNIVERSE'' '
+  SELECT @SQL = @SQL + 'WHEN ''C'' THEN ''SECTOR'' '
+  SELECT @SQL = @SQL + 'WHEN ''G'' THEN ''SEGMENT'' END AS [Relative To], '
+  SELECT @SQL = @SQL + 'r2.weight AS [Weight], '
+  SELECT @SQL = @SQL + 'r2.curr_rank AS [Current Rank], '
+  SELECT @SQL = @SQL + 'r2.prev_rank AS [Previous Rank], '
+  SELECT @SQL = @SQL + 'r2.change_rank AS [Rank Change] '
+  SELECT @SQL = @SQL + 'FROM #RESULT r, #RESULT2 r2 '
+  SELECT @SQL = @SQL + 'WHERE r.security_id = r2.security_id '
+
   IF EXISTS (SELECT * FROM strategy WHERE strategy_id = @STRATEGY_ID AND rank_order = 1)
-  BEGIN
-    SELECT r2.ticker	AS [Ticker],
-           r2.cusip	AS [CUSIP],
-           r2.sedol	AS [SEDOL],
-           r2.isin	AS [ISIN],
-           r2.factor_short_nm AS [Factor],
-           r2.factor_nm AS [Factor Name],
-           CASE r2.against WHEN 'U' THEN 'UNIVERSE'
-                           WHEN 'C' THEN 'SECTOR'
-                           WHEN 'G' THEN 'SEGMENT' END AS [Relative To],
-           r2.weight	AS [Weight],
-           r2.curr_rank	AS [Current Rank],
-           r2.prev_rank	AS [Previous Rank],
-           r2.change_rank	AS [Rank Change]
-      FROM #RESULT r, #RESULT2 r2
-     WHERE r.cusip = r2.cusip
-     ORDER BY r.cusip, r.sedol, r2.change_rank DESC, r2.curr_rank DESC
-  END
+    BEGIN SELECT @SQL = @SQL + 'ORDER BY r.cusip, r.sedol, r2.change_rank DESC, r2.curr_rank DESC' END
   ELSE
-  BEGIN
-    SELECT r2.ticker	AS [Ticker],
-           r2.cusip	AS [CUSIP],
-           r2.sedol	AS [SEDOL],
-           r2.isin	AS [ISIN],
-           r2.factor_short_nm AS [Factor],
-           r2.factor_nm AS [Factor Name],
-           CASE r2.against WHEN 'U' THEN 'UNIVERSE'
-                           WHEN 'C' THEN 'SECTOR'
-                           WHEN 'G' THEN 'SEGMENT' END AS [Relative To],
-           r2.weight	AS [Weight],
-           r2.curr_rank	AS [Current Rank],
-           r2.prev_rank	AS [Previous Rank],
-           r2.change_rank	AS [Rank Change]
-      FROM #RESULT r, #RESULT2 r2
-     WHERE r.cusip = r2.cusip
-     ORDER BY r.cusip, r.sedol, r2.change_rank, r2.curr_rank
-  END
+    BEGIN SELECT @SQL = @SQL + 'ORDER BY r.cusip, r.sedol, r2.change_rank, r2.curr_rank' END
+
+  IF @DEBUG = 1
+    BEGIN SELECT '@SQL', @SQL END
+
+  EXEC(@SQL)
 
   DROP TABLE #RESULT2
-END
-ELSE IF @REPORT_VIEW = 'UNIVERSE'
-BEGIN
-  IF EXISTS (SELECT * FROM strategy WHERE strategy_id = @STRATEGY_ID AND rank_order = 1)
-  BEGIN
-    SELECT ticker			AS [Ticker],
-           cusip			AS [CUSIP],
-           sedol			AS [SEDOL],
-           isin			AS [ISIN],
-           imnt_nm		AS [Name],
-           country_nm		AS [Country Name],
-           ISNULL(sector_nm, 'UNKNOWN') AS [Sector Name],
-           ISNULL(segment_nm, 'UNKNOWN') AS [Segment Name],
-           acct_bmk_wgt		AS [Acct-Bmk Wgt],
-           curr_total_score	AS [Current],
-           prev_total_score	AS [Previous],
-           change_total_score	AS [Change]
-      FROM #RESULT
-     WHERE curr_total_score IS NOT NULL
-     ORDER BY curr_total_score DESC
-
-    SELECT ticker			AS [Ticker],
-           cusip			AS [CUSIP],
-           sedol			AS [SEDOL],
-           isin			AS [ISIN],
-           imnt_nm		AS [Name],
-           country_nm		AS [Country Name],
-           ISNULL(sector_nm, 'UNKNOWN') AS [Sector Name],
-           ISNULL(segment_nm, 'UNKNOWN') AS [Segment Name],
-           acct_bmk_wgt		AS [Acct-Bmk Wgt],
-           curr_total_score	AS [Current],
-           prev_total_score	AS [Previous],
-           change_total_score	AS [Change]
-      FROM #RESULT
-     WHERE curr_total_score IS NULL
-     ORDER BY prev_total_score DESC
-  END
-  ELSE
-  BEGIN
-    SELECT ticker			AS [Ticker],
-           cusip			AS [CUSIP],
-           sedol			AS [SEDOL],
-           isin			AS [ISIN],
-           imnt_nm		AS [Name],
-           country_nm		AS [Country Name],
-           ISNULL(sector_nm, 'UNKNOWN') AS [Sector Name],
-           ISNULL(segment_nm, 'UNKNOWN') AS [Segment Name],
-           acct_bmk_wgt		AS [Acct-Bmk Wgt],
-           curr_total_score	AS [Current],
-           prev_total_score	AS [Previous],
-           change_total_score	AS [Change]
-      FROM #RESULT
-     WHERE curr_total_score IS NOT NULL
-     ORDER BY curr_total_score
-
-    SELECT ticker			AS [Ticker],
-           cusip			AS [CUSIP],
-           sedol			AS [SEDOL],
-           isin			AS [ISIN],
-           imnt_nm		AS [Name],
-           country_nm		AS [Country Name],
-           ISNULL(sector_nm, 'UNKNOWN') AS [Sector Name],
-           ISNULL(segment_nm, 'UNKNOWN') AS [Segment Name],
-           acct_bmk_wgt		AS [Acct-Bmk Wgt],
-           curr_total_score	AS [Current],
-           prev_total_score	AS [Previous],
-           change_total_score	AS [Change]
-      FROM #RESULT
-     WHERE curr_total_score IS NULL
-     ORDER BY prev_total_score
-  END
 END
 
 DROP TABLE #RESULT

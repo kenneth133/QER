@@ -2,25 +2,20 @@ use QER
 go
 
 CREATE TABLE #SS_SECURITY (
-  sector_id	int		NULL,
+  sector_id		int		NULL,
   segment_id	int		NULL,
-  mqa_id	varchar(32)	NULL,
-  ticker	varchar(16)	NULL,
-  cusip		varchar(32)	NULL,
-  sedol		varchar(32)	NULL,
-  isin		varchar(64)	NULL,
-  gv_key	int		NULL
+  security_id	int		NULL
 )
 
 CREATE TABLE #SCORES (
-  cusip			varchar(32)	NOT NULL,
+  security_id	int		NULL,
   sector_id		int		NULL,
-  segment_id		int		NULL,
-  sector_score		float		NULL,
-  segment_score		float		NULL,
-  ss_score		float		NULL,
-  universe_score	float		NULL,
-  total_score		float		NULL
+  segment_id	int		NULL,
+  sector_score	float	NULL,
+  segment_score	float	NULL,
+  ss_score		float	NULL,
+  universe_score float	NULL,
+  total_score	float	NULL
 )
 
 IF OBJECT_ID('dbo.scores_temp_rank_update') IS NOT NULL
@@ -51,7 +46,8 @@ DECLARE @AGAINST varchar(1),
         @GROUPS int,
         @UNIVERSE_ID int,
         @RANK_EVENT_ID_MIN int,
-        @RANK_EVENT_ID_MAX int
+        @RANK_EVENT_ID_MAX int,
+        @NOW datetime
 
 SELECT @GROUPS = fractile
   FROM strategy
@@ -61,65 +57,35 @@ IF @BDATE IS NULL
   BEGIN EXEC business_date_get @DIFF=-1, @RET_DATE=@BDATE OUTPUT END
 
 SELECT @UNIVERSE_ID = universe_id
-  FROM QER..strategy
+  FROM strategy
  WHERE strategy_id = @STRATEGY_ID
 
 SELECT @FACTOR_ID = factor_id
-  FROM QER..factor
+  FROM factor
  WHERE factor_cd = 'DUMMY'
 
-CREATE TABLE #DUMMY_FACTOR_STAGING (
-  mqa_id	varchar(32)	NULL,
-  ticker	varchar(16)	NULL,
-  cusip		varchar(32)	NULL,
-  sedol		varchar(32)	NULL,
-  isin		varchar(64)	NULL,
-  gv_key	int		NULL,
-  factor_value	float		NULL
-)
+SELECT @NOW = GETDATE()
 
-INSERT #DUMMY_FACTOR_STAGING
-SELECT DISTINCT mqa_id, ticker, cusip, sedol, isin, gv_key,
+EXEC dummy_data_delete
+
+INSERT instrument_factor
+SELECT @BDATE, security_id, @FACTOR_ID,
        CASE @SCORE_TYPE WHEN 'SECTOR_SCORE' THEN sector_score
                         WHEN 'SEGMENT_SCORE' THEN segment_score
                         WHEN 'SS_SCORE' THEN ss_score
                         WHEN 'UNIVERSE_SCORE' THEN universe_score
-                        WHEN 'TOTAL_SCORE' THEN total_score END
+                        WHEN 'TOTAL_SCORE' THEN total_score END,
+       @NOW, 'FS'
   FROM #SCORES
 
 IF @DEBUG = 1
 BEGIN
-  SELECT '#SCORES'
-  SELECT * FROM #SCORES ORDER BY cusip
-  SELECT '#DUMMY_FACTOR_STAGING'
-  SELECT * FROM #DUMMY_FACTOR_STAGING ORDER BY cusip, ticker
-END
-
-DELETE QER..instrument_factor_staging
-
-INSERT QER..instrument_factor_staging
-SELECT @BDATE, mqa_id, ticker, cusip, sedol, isin, gv_key, 'DUMMY', AVG(factor_value)
-  FROM #DUMMY_FACTOR_STAGING
- GROUP BY mqa_id, ticker, cusip, sedol, isin, gv_key
-
-IF @DEBUG = 1
-BEGIN
-  SELECT 'instrument_factor_staging'
-  SELECT * FROM instrument_factor_staging ORDER BY cusip, ticker
-END
-
-DROP TABLE #DUMMY_FACTOR_STAGING
-
-EXEC QER..instrument_factor_load @SOURCE_CD='FS'
-
-IF @DEBUG = 1
-BEGIN
   SELECT 'instrument_factor'
-  SELECT * FROM instrument_factor WHERE bdate=@BDATE AND factor_id=@FACTOR_ID ORDER BY cusip, ticker
+  SELECT * FROM instrument_factor WHERE bdate=@BDATE AND factor_id=@FACTOR_ID ORDER BY security_id
 END
 
 SELECT @RANK_EVENT_ID_MIN = max(rank_event_id) + 1
-  FROM QER..rank_inputs
+  FROM rank_inputs
 
 IF @SCORE_TYPE IN ('SECTOR_SCORE', 'SS_SCORE', 'SEGMENT_SCORE')
 BEGIN
@@ -165,7 +131,7 @@ BEGIN
 END
 
 SELECT @RANK_EVENT_ID_MAX = max(rank_event_id)
-  FROM QER..rank_inputs
+  FROM rank_inputs
 
 UPDATE #SCORES
    SET sector_score = CASE @SCORE_TYPE WHEN 'SECTOR_SCORE' THEN o.rank ELSE #SCORES.sector_score END,
@@ -173,18 +139,18 @@ UPDATE #SCORES
        ss_score = CASE @SCORE_TYPE WHEN 'SS_SCORE' THEN o.rank ELSE #SCORES.ss_score END,
        universe_score = CASE @SCORE_TYPE WHEN 'UNIVERSE_SCORE' THEN o.rank ELSE #SCORES.universe_score END,
        total_score = CASE @SCORE_TYPE WHEN 'TOTAL_SCORE' THEN o.rank ELSE #SCORES.total_score END
-  FROM QER..rank_output o
+  FROM rank_output o
  WHERE o.rank_event_id >= @RANK_EVENT_ID_MIN
    AND o.rank_event_id <= @RANK_EVENT_ID_MAX
-   AND o.cusip = #SCORES.cusip
+   AND o.security_id = #SCORES.security_id
 
 IF @DEBUG = 1
 BEGIN
   SELECT '#SCORES'
-  SELECT * FROM #SCORES ORDER BY cusip
+  SELECT * FROM #SCORES ORDER BY security_id
 END
 
-EXEC QER..dummy_data_delete
+EXEC dummy_data_delete
 
 RETURN 0
 go
@@ -196,3 +162,4 @@ go
 
 DROP TABLE #SCORES
 DROP TABLE #SS_SECURITY
+go

@@ -18,11 +18,6 @@ CREATE PROCEDURE dbo.rpt_portfolio_view_history @BDATE datetime,
 AS
 /* PORTFOLIO - RANKS */
 
-/****
-* KNOWN ISSUES:
-*   THIS PROCEDURE DOES NOT HANDLE INTERNATIONAL SECURITIES - IT JOINS ON CUSIP ONLY
-****/
-
 IF @BDATE IS NULL
   BEGIN SELECT 'ERROR: @BDATE IS A REQUIRED PARAMETER' RETURN -1 END
 IF @STRATEGY_ID IS NULL
@@ -91,9 +86,7 @@ END
 
 CREATE TABLE #POSITION_SCORES (
   bdate			datetime	NULL,
-  cusip			varchar(32)	NULL,
-  sedol			varchar(32)	NULL,
-
+  security_id	int			NULL,
   units			float		NULL,
   price			float		NULL,
   mval			float		NULL,
@@ -104,26 +97,30 @@ CREATE TABLE #POSITION_SCORES (
   sector_score		float		NULL,
   segment_score		float		NULL,
 
-  wgt_total		float		NULL,
+  wgt_total			float		NULL,
   wgt_universe		float		NULL,
   wgt_sector		float		NULL,
   wgt_segment		float		NULL
 )
 
-INSERT #POSITION_SCORES (bdate, cusip, sedol, units, total_score, universe_score, sector_score, segment_score)
-SELECT p.bdate, p.cusip, p.sedol, ISNULL(p.units, 0.0), s.total_score, s.universe_score, s.sector_score, s.segment_score
-  FROM position p, scores s
- WHERE p.account_cd = @ACCOUNT_CD
-   AND p.bdate IN (SELECT DISTINCT bdate FROM #DATE)
-   AND p.bdate = s.bdate
-   AND s.strategy_id = @STRATEGY_ID
-   AND p.cusip = s.cusip
+INSERT #POSITION_SCORES (bdate, security_id, units, total_score, universe_score, sector_score, segment_score)
+SELECT s.bdate, s.security_id, x.quantity, s.total_score, s.universe_score, s.sector_score, s.segment_score
+  FROM scores s,
+      (SELECT reference_date, security_id, SUM(ISNULL(quantity,0.0)) AS [quantity]
+         FROM equity_common..position
+        WHERE reference_date IN (SELECT DISTINCT bdate FROM #DATE)
+          AND reference_date = effective_date
+          AND acct_cd IN (SELECT DISTINCT acct_cd FROM equity_common..account WHERE parent = @ACCOUNT_CD OR acct_cd = @ACCOUNT_CD)
+        GROUP BY reference_date, security_id) x
+ WHERE s.strategy_id = @STRATEGY_ID
+   AND s.bdate = x.reference_date
+   AND s.security_id = x.security_id
 
 UPDATE #POSITION_SCORES
-   SET price = i.price_close
-  FROM instrument_characteristics i
- WHERE #POSITION_SCORES.bdate = i.bdate
-   AND #POSITION_SCORES.cusip = i.cusip
+   SET price = p.price_close_usd
+  FROM equity_common..market_price p
+ WHERE #POSITION_SCORES.security_id = p.security_id
+   AND #POSITION_SCORES.bdate = p.reference_date
 
 UPDATE #POSITION_SCORES
    SET mval = units * price
@@ -183,11 +180,11 @@ UPDATE #POSITION_SCORES
 IF @DEBUG = 1
 BEGIN
   SELECT '#POSITION_SCORES'
-  SELECT * FROM #POSITION_SCORES ORDER BY bdate, cusip, sedol
+  SELECT * FROM #POSITION_SCORES ORDER BY bdate, security_id
 END
 
 CREATE TABLE #RESULT (
-  bdate			datetime	NULL,
+  bdate				datetime	NULL,
   total_wgt_avg		float		NULL,
   total_median		float		NULL,
   universe_wgt_avg	float		NULL,
@@ -213,7 +210,7 @@ DECLARE @MEDIAN_SCORE float
 
 CREATE TABLE #TEMP (
   ordinal	int identity(1,1)	NOT NULL,
-  score		float			NOT NULL
+  score		float				NOT NULL
 )
 
 WHILE EXISTS (SELECT * FROM #RESULT WHERE total_median IS NULL)
@@ -361,9 +358,9 @@ BEGIN
   SELECT * FROM #RESULT ORDER BY bdate
 END
 
-SELECT bdate		AS [Date],
+SELECT bdate			AS [Date],
        total_wgt_avg	AS [Total Wgt Avg],
-       total_median	AS [Total Median],
+       total_median		AS [Total Median],
        universe_wgt_avg	AS [Universe Wgt Avg],
        universe_median	AS [Universe Median],
        sector_wgt_avg	AS [Sector Wgt Avg],

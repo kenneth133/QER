@@ -10,17 +10,7 @@ BEGIN
 END
 go
 CREATE PROCEDURE dbo.category_score_load
-@MODE varchar(16) = 'RELOAD',
-@IDENTIFIER varchar(16) = 'CUSIP'
 AS
-
-SELECT @MODE = UPPER(@MODE)
-SELECT @IDENTIFIER = UPPER(@IDENTIFIER)
-
-IF @MODE NOT IN ('APPEND', 'OVERWRITE', 'RELOAD')
-  BEGIN SELECT 'ERROR: INVALID VALUE PASSED FOR @MODE PARAMETER' RETURN -1 END
-IF @MODE IN ('APPEND', 'OVERWRITE') AND @IDENTIFIER NOT IN ('TICKER', 'CUSIP', 'SEDOL', 'ISIN')
-  BEGIN SELECT 'ERROR: INVALID VALUE PASSED FOR @IDENTIFIER PARAMETER' RETURN -1 END
 
 UPDATE category_score_staging
    SET score_level = d.code
@@ -34,133 +24,44 @@ UPDATE category_score_staging
  WHERE d.item = 'FACTOR_CATEGORY'
    AND category_score_staging.category_nm = REPLACE(d.decode, ' ', '')
 
-IF @MODE = 'RELOAD'
-BEGIN
-  DELETE category_score
-    FROM (SELECT DISTINCT s.bdate, g.strategy_id
-            FROM strategy g, category_score_staging s
-           WHERE g.strategy_cd = s.strategy_cd) x
-   WHERE category_score.bdate = x.bdate
-     AND category_score.strategy_id = x.strategy_id
-END
-ELSE IF @MODE = 'OVERWRITE'
-BEGIN
-  IF @IDENTIFIER = 'TICKER'
-  BEGIN
-    DELETE category_score
-      FROM strategy g, category_score_staging s, decode d
-     WHERE s.strategy_cd = g.strategy_cd
-       AND category_score.strategy_id = g.strategy_id
-       AND category_score.bdate = s.bdate
-       AND d.item = 'FACTOR_CATEGORY'
-       AND category_score.category = d.code
-       AND s.category_nm = d.decode
-       AND category_score.score_level = s.score_level
-       AND category_score.ticker = s.ticker
-  END
-  ELSE IF @IDENTIFIER = 'CUSIP'
-  BEGIN
-    DELETE category_score
-      FROM strategy g, category_score_staging s, decode d
-     WHERE s.strategy_cd = g.strategy_cd
-       AND category_score.strategy_id = g.strategy_id
-       AND category_score.bdate = s.bdate
-       AND d.item = 'FACTOR_CATEGORY'
-       AND category_score.category = d.code
-       AND s.category_nm = d.decode
-       AND category_score.score_level = s.score_level
-       AND category_score.cusip = s.cusip
-  END
-  ELSE IF @IDENTIFIER = 'SEDOL'
-  BEGIN
-    DELETE category_score
-      FROM strategy g, category_score_staging s, decode d
-     WHERE s.strategy_cd = g.strategy_cd
-       AND category_score.strategy_id = g.strategy_id
-       AND category_score.bdate = s.bdate
-       AND d.item = 'FACTOR_CATEGORY'
-       AND category_score.category = d.code
-       AND s.category_nm = d.decode
-       AND category_score.score_level = s.score_level
-       AND category_score.sedol = s.sedol
-  END
-  ELSE IF @IDENTIFIER = 'ISIN'
-  BEGIN
-    DELETE category_score
-      FROM strategy g, category_score_staging s, decode d
-     WHERE s.strategy_cd = g.strategy_cd
-       AND category_score.strategy_id = g.strategy_id
-       AND category_score.bdate = s.bdate
-       AND d.item = 'FACTOR_CATEGORY'
-       AND category_score.category = d.code
-       AND s.category_nm = d.decode
-       AND category_score.score_level = s.score_level
-       AND category_score.isin = s.isin
-  END
-END
-ELSE IF @MODE = 'APPEND'
-BEGIN
-  IF @IDENTIFIER = 'TICKER'
-  BEGIN
-    DELETE category_score_staging
-      FROM strategy g, category_score c, decode d
-     WHERE c.strategy_id = g.strategy_id
-       AND category_score_staging.strategy_cd = g.strategy_cd
-       AND category_score_staging.bdate = c.bdate
-       AND d.item = 'FACTOR_CATEGORY'
-       AND category_score_staging.category_nm = d.decode
-       AND c.category = d.code
-       AND category_score_staging.score_level = c.score_level
-       AND category_score_staging.ticker = c.ticker
-  END
-  ELSE IF @IDENTIFIER = 'CUSIP'
-  BEGIN
-    DELETE category_score_staging
-      FROM strategy g, category_score c, decode d
-     WHERE c.strategy_id = g.strategy_id
-       AND category_score_staging.strategy_cd = g.strategy_cd
-       AND category_score_staging.bdate = c.bdate
-       AND d.item = 'FACTOR_CATEGORY'
-       AND category_score_staging.category_nm = d.decode
-       AND c.category = d.code
-       AND category_score_staging.score_level = c.score_level
-       AND category_score_staging.cusip = c.cusip
-  END
-  ELSE IF @IDENTIFIER = 'SEDOL'
-  BEGIN
-    DELETE category_score_staging
-      FROM strategy g, category_score c, decode d
-     WHERE c.strategy_id = g.strategy_id
-       AND category_score_staging.strategy_cd = g.strategy_cd
-       AND category_score_staging.bdate = c.bdate
-       AND d.item = 'FACTOR_CATEGORY'
-       AND category_score_staging.category_nm = d.decode
-       AND c.category = d.code
-       AND category_score_staging.score_level = c.score_level
-       AND category_score_staging.sedol = c.sedol
-  END
-  ELSE IF @IDENTIFIER = 'ISIN'
-  BEGIN
-    DELETE category_score_staging
-      FROM strategy g, category_score c, decode d
-     WHERE c.strategy_id = g.strategy_id
-       AND category_score_staging.strategy_cd = g.strategy_cd
-       AND category_score_staging.bdate = c.bdate
-       AND d.item = 'FACTOR_CATEGORY'
-       AND category_score_staging.category_nm = d.decode
-       AND c.category = d.code
-       AND category_score_staging.score_level = c.score_level
-       AND category_score_staging.isin = c.isin
-  END
-END
+CREATE TABLE #CATEGORY_SCORE_STAGING (
+  bdate				datetime	NULL,
+  strategy_cd		varchar(16)	NULL,
+  security_id		int			NULL,
+  ticker			varchar(16)	NULL,
+  cusip				varchar(32)	NULL,
+  sedol				varchar(32)	NULL,
+  isin				varchar(64)	NULL,
+  currency_cd		varchar(3)	NULL,
+  exchange_nm		varchar(40)	NULL,
+  score_level		varchar(32)	NULL,
+  category_nm		varchar(64)	NULL,
+  category_score	float		NULL
+)
+
+INSERT #CATEGORY_SCORE_STAGING
+SELECT bdate, strategy_cd, NULL, ticker, cusip, sedol, isin, currency_cd, exchange_nm,
+       score_level, category_nm, category_score
+  FROM category_score_staging
+
+EXEC security_id_update @TABLE_NAME='#CATEGORY_SCORE_STAGING'
+
+DELETE category_score
+  FROM (SELECT DISTINCT s.bdate, g.strategy_id
+          FROM strategy g, #CATEGORY_SCORE_STAGING s
+         WHERE g.strategy_cd = s.strategy_cd) x
+ WHERE category_score.bdate = x.bdate
+   AND category_score.strategy_id = x.strategy_id
 
 INSERT category_score
-      (bdate, strategy_id, mqa_id, ticker, cusip, sedol, isin, gv_key, score_level, category, category_score)
-SELECT s.bdate, g.strategy_id, s.mqa_id, s.ticker, s.cusip, s.sedol, s.isin, s.gv_key, s.score_level, d.code, s.category_score
-  FROM strategy g, category_score_staging s, decode d
+      (bdate, strategy_id, security_id, score_level, category, category_score)
+SELECT s.bdate, g.strategy_id, s.security_id, s.score_level, d.code, s.category_score
+  FROM strategy g, #CATEGORY_SCORE_STAGING s, decode d
  WHERE g.strategy_cd = s.strategy_cd
    AND d.item = 'FACTOR_CATEGORY'
    AND d.decode = s.category_nm
+
+DROP TABLE #CATEGORY_SCORE_STAGING
 
 RETURN 0
 go

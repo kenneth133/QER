@@ -13,7 +13,7 @@ CREATE PROCEDURE dbo.rpt_model_performance @BDATE datetime,
                                            @RETURN_TYPE varchar(16),
                                            @STRATEGY_ID int,
                                            @ACCOUNT_CD varchar(32) = NULL,
-                                           @BM_UNIVERSE_ID int = NULL,
+                                           @BENCHMARK_CD varchar(50) = NULL,
                                            @MODEL_PORTFOLIO_DEF_CD varchar(32) = NULL,
                                            @WEIGHT varchar(16) = NULL,
                                            @PERIOD_TYPE varchar(2),
@@ -24,10 +24,7 @@ AS
 
 /****
 * KNOWN ISSUES:
-* - THIS PROCEDURE DOES NOT HANDLE INTERNATIONAL SECURITIES - IT JOINS ON CUSIP ONLY
-* - THIS PROCEDURE DOES NOT HANDLE "SEGMENT MODELS"
-* - IF RETURN_TYPE LIKE '%MODEL%' AND THERE IS A CUSIP CHANGE DURING THE PERIOD,
-*   THE SECURITY'S RETURN AFTER THE CUSIP CHANGE FOR THAT PERIOD WILL NOT BE CAPTURED
+* THIS PROCEDURE DOES NOT HANDLE "SEGMENT MODELS"
 ****/
 
 IF @BDATE IS NULL
@@ -42,8 +39,8 @@ IF @RETURN_TYPE LIKE '%MODEL%' AND @MODEL_PORTFOLIO_DEF_CD IS NULL
   BEGIN SELECT 'ERROR: @MODEL_PORTFOLIO_DEF_CD IS A REQUIRED PARAMETER' RETURN -1 END
 IF @RETURN_TYPE LIKE '%ACCT%' AND @ACCOUNT_CD IS NULL
   BEGIN SELECT 'ERROR: @ACCOUNT_CD IS A REQUIRED PARAMETER' RETURN -1 END
-IF @RETURN_TYPE LIKE '%BMK%' AND @BM_UNIVERSE_ID IS NULL
-  BEGIN SELECT 'ERROR: @BM_UNIVERSE_ID IS A REQUIRED PARAMETER' RETURN -1 END
+IF @RETURN_TYPE LIKE '%BMK%' AND @BENCHMARK_CD IS NULL
+  BEGIN SELECT 'ERROR: @BENCHMARK_CD IS A REQUIRED PARAMETER' RETURN -1 END
 IF @STRATEGY_ID IS NULL
   BEGIN SELECT 'ERROR: @STRATEGY_ID IS A REQUIRED PARAMETER' RETURN -1 END
 IF @PERIOD_TYPE IS NULL
@@ -281,7 +278,7 @@ BEGIN
                       AND p.return_type = 'BMK'
                       AND p.strategy_id = @STRATEGY_ID
                       AND p.weight = @WEIGHT
-                      AND p.bm_universe_id = @BM_UNIVERSE_ID
+                      AND p.benchmark_cd = @BENCHMARK_CD
                       AND p.return_calc_id = r.return_calc_id)
     BEGIN
       DELETE return_calc_params
@@ -290,8 +287,8 @@ BEGIN
          AND return_type = 'BMK'
          AND strategy_id = @STRATEGY_ID
          AND weight = @WEIGHT
-         AND bm_universe_id = @BM_UNIVERSE_ID
-      EXEC return_calculate @BDATE_FROM=@BEGIN_BDATE, @BDATE_TO=@END_BDATE, @RETURN_TYPE='BMK', @STRATEGY_ID=@STRATEGY_ID, @WEIGHT=@WEIGHT, @BM_UNIVERSE_ID=@BM_UNIVERSE_ID, @DEBUG=@DEBUG
+         AND benchmark_cd = @BENCHMARK_CD
+      EXEC return_calculate @BDATE_FROM=@BEGIN_BDATE, @BDATE_TO=@END_BDATE, @RETURN_TYPE='BMK', @STRATEGY_ID=@STRATEGY_ID, @WEIGHT=@WEIGHT, @BENCHMARK_CD=@BENCHMARK_CD, @DEBUG=@DEBUG
     END
   END
   IF @RETURN_TYPE LIKE '%MODEL%'
@@ -396,7 +393,7 @@ BEGIN
        AND p.return_type = 'BMK'
        AND p.strategy_id = @STRATEGY_ID
        AND p.weight = @WEIGHT
-       AND p.bm_universe_id = @BM_UNIVERSE_ID
+       AND p.benchmark_cd = @BENCHMARK_CD
        AND p.return_calc_id = r.return_calc_id
        AND r.univ_type = 'TOTAL'
   END
@@ -659,7 +656,7 @@ BEGIN
   SELECT * FROM #RESULT ORDER BY ordinal, end_bdate
 END
 
-DECLARE @SQL varchar(1500),
+DECLARE @SQL varchar(2000),
         @SECTOR_MODEL_ID int,
         @SECTOR_ID int,
         @SECTOR_NUM int,
@@ -716,7 +713,7 @@ BEGIN
          AND p.return_type = 'BMK'
          AND p.strategy_id = @STRATEGY_ID
          AND p.weight = @WEIGHT
-         AND p.bm_universe_id = @BM_UNIVERSE_ID
+         AND p.benchmark_cd = @BENCHMARK_CD
          AND p.return_calc_id = r.return_calc_id
          AND r.univ_type = 'SECTOR'
          AND r.sector_model_id = @SECTOR_MODEL_ID
@@ -846,7 +843,7 @@ BEGIN
                   AND p.return_type = 'BMK'
                   AND p.strategy_id = @STRATEGY_ID
                   AND p.weight = @WEIGHT
-                  AND p.bm_universe_id = @BM_UNIVERSE_ID
+                  AND p.benchmark_cd = @BENCHMARK_CD
                   AND p.return_calc_id = r.return_calc_id
                   AND r.univ_type = 'SECTOR'
                   AND r.sector_model_id = @SECTOR_MODEL_ID
@@ -945,7 +942,7 @@ BEGIN
          AND p.return_type = 'BMK'
          AND p.strategy_id = @STRATEGY_ID
          AND p.weight = @WEIGHT
-         AND p.bm_universe_id = @BM_UNIVERSE_ID
+         AND p.benchmark_cd = @BENCHMARK_CD
          AND p.return_calc_id = r.return_calc_id
          AND r.univ_type = 'SECTOR'
          AND r.sector_model_id = @SECTOR_MODEL_ID
@@ -1074,13 +1071,28 @@ END
 IF @RETURN_TYPE = 'ACCT'
   BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NOT NULL AND begin_bdate > (SELECT MIN(bdate) FROM position WHERE account_cd = '''+@ACCOUNT_CD+''') ORDER BY ordinal' END
 ELSE IF @RETURN_TYPE = 'BMK'
-  BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NOT NULL AND begin_bdate > (SELECT MIN(universe_dt) FROM universe_makeup WHERE universe_id = '+CONVERT(varchar,@BM_UNIVERSE_ID)+') ORDER BY ordinal' END
+BEGIN
+  IF EXISTS (SELECT 1 FROM benchmark WHERE benchmark_cd = @BENCHMARK_CD)
+    BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NOT NULL AND begin_bdate > (SELECT MIN(reference_date) FROM equity_common..benchmark_weight WHERE acct_cd = '''+@BENCHMARK_CD+''') ORDER BY ordinal' END
+  ELSE
+    BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NOT NULL AND begin_bdate > (SELECT MIN(universe_dt) FROM universe_makeup WHERE universe_id IN (SELECT universe_id FROM universe_def WHERE universe_cd = '''+@BENCHMARK_CD+''')) ORDER BY ordinal' END
+END
 ELSE IF @RETURN_TYPE = 'MODEL'
   BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NOT NULL AND begin_bdate > (SELECT MIN(bdate) FROM scores WHERE strategy_id = '+CONVERT(varchar,@STRATEGY_ID)+') ORDER BY ordinal' END
 ELSE IF @RETURN_TYPE = 'ACCT-BMK'
-  BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NOT NULL AND begin_bdate > (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM position WHERE account_cd = '''+@ACCOUNT_CD+''' UNION SELECT MIN(universe_dt) AS [bdate] FROM universe_makeup WHERE universe_id = '+CONVERT(varchar,@BM_UNIVERSE_ID)+') x) ORDER BY ordinal' END
+BEGIN
+  IF EXISTS (SELECT 1 FROM benchmark WHERE benchmark_cd = @BENCHMARK_CD)
+    BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NOT NULL AND begin_bdate > (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM position WHERE account_cd = '''+@ACCOUNT_CD+''' UNION SELECT MIN(reference_date) FROM equity_common..benchmark_weight WHERE acct_cd = '''+@BENCHMARK_CD+''') x) ORDER BY ordinal' END
+  ELSE
+    BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NOT NULL AND begin_bdate > (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM position WHERE account_cd = '''+@ACCOUNT_CD+''' UNION SELECT MIN(universe_dt) AS [bdate] FROM universe_makeup WHERE universe_id IN (SELECT universe_id FROM universe_def WHERE universe_cd = '''+@BENCHMARK_CD+''')) x) ORDER BY ordinal' END
+END
 ELSE IF @RETURN_TYPE = 'MODEL-BMK'
-  BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NOT NULL AND begin_bdate > (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM scores WHERE strategy_id = '+CONVERT(varchar,@STRATEGY_ID)+' UNION SELECT MIN(universe_dt) AS [bdate] FROM universe_makeup WHERE universe_id = '+CONVERT(varchar,@BM_UNIVERSE_ID)+') x) ORDER BY ordinal' END
+BEGIN
+  IF EXISTS (SELECT 1 FROM benchmark WHERE benchmark_cd = @BENCHMARK_CD)
+    BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NOT NULL AND begin_bdate > (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM scores WHERE strategy_id = '+CONVERT(varchar,@STRATEGY_ID)+' UNION SELECT MIN(reference_date) FROM equity_common..benchmark_weight WHERE acct_cd = '''+@BENCHMARK_CD+''') x) ORDER BY ordinal' END
+  ELSE
+    BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NOT NULL AND begin_bdate > (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM scores WHERE strategy_id = '+CONVERT(varchar,@STRATEGY_ID)+' UNION SELECT MIN(universe_dt) AS [bdate] FROM universe_makeup WHERE universe_id IN (SELECT universe_id FROM universe_def WHERE universe_cd = '''+@BENCHMARK_CD+''')) x) ORDER BY ordinal' END
+END
 ELSE IF @RETURN_TYPE = 'ACCT-MODEL'
   BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NOT NULL AND begin_bdate > (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM position WHERE account_cd = '''+@ACCOUNT_CD+''' UNION SELECT MIN(bdate) AS [bdate] FROM scores WHERE strategy_id = '+CONVERT(varchar,@STRATEGY_ID)+') x) ORDER BY ordinal' END
 
@@ -1106,13 +1118,28 @@ END
 IF @RETURN_TYPE = 'ACCT'
   BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NULL AND begin_bdate >= ''20070101'' AND begin_bdate > (SELECT MIN(bdate) FROM position WHERE account_cd = '''+@ACCOUNT_CD+''') ORDER BY end_bdate DESC' END
 ELSE IF @RETURN_TYPE = 'BMK'
-  BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NULL AND begin_bdate >= ''20070101'' AND begin_bdate > (SELECT MIN(universe_dt) FROM universe_makeup WHERE universe_id = '+CONVERT(varchar,@BM_UNIVERSE_ID)+') ORDER BY end_bdate DESC' END
+BEGIN
+  IF EXISTS (SELECT 1 FROM benchmark WHERE benchmark_cd = @BENCHMARK_CD)
+    BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NULL AND begin_bdate >= ''20070101'' AND begin_bdate > (SELECT MIN(reference_date) FROM equity_common..benchmark_weight WHERE acct_cd = '''+@BENCHMARK_CD+''') ORDER BY end_bdate DESC' END
+  ELSE
+    BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NULL AND begin_bdate >= ''20070101'' AND begin_bdate >= (SELECT MIN(universe_dt) FROM universe_makeup WHERE universe_id IN (SELECT universe_id FROM universe_def WHERE universe_cd = '''+@BENCHMARK_CD+''')) ORDER BY end_bdate DESC' END
+END
 ELSE IF @RETURN_TYPE = 'MODEL'
   BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NULL AND begin_bdate >= ''20070101'' AND begin_bdate > (SELECT MIN(bdate) FROM scores WHERE strategy_id = '+CONVERT(varchar,@STRATEGY_ID)+') ORDER BY end_bdate DESC' END
 ELSE IF @RETURN_TYPE = 'ACCT-BMK'
-  BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NULL AND begin_bdate >= ''20070101'' AND begin_bdate > (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM position WHERE account_cd = '''+@ACCOUNT_CD+''' UNION SELECT MIN(universe_dt) AS [bdate] FROM universe_makeup WHERE universe_id = '+CONVERT(varchar,@BM_UNIVERSE_ID)+') x) ORDER BY end_bdate DESC' END
+BEGIN
+  IF EXISTS (SELECT 1 FROM benchmark WHERE benchmark_cd = @BENCHMARK_CD)
+    BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NULL AND begin_bdate >= ''20070101'' AND begin_bdate > (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM position WHERE account_cd = '''+@ACCOUNT_CD+''' UNION SELECT MIN(reference_date) FROM equity_common..benchmark_weight WHERE acct_cd = '''+@BENCHMARK_CD+''') x) ORDER BY end_bdate DESC' END
+  ELSE
+    BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NULL AND begin_bdate >= ''20070101'' AND begin_bdate >= (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM position WHERE account_cd = '''+@ACCOUNT_CD+''' UNION SELECT MIN(universe_dt) AS [bdate] FROM universe_makeup WHERE universe_id IN (SELECT universe_id FROM universe_def WHERE universe_cd = '''+@BENCHMARK_CD+''')) x) ORDER BY end_bdate DESC' END
+END
 ELSE IF @RETURN_TYPE = 'MODEL-BMK'
-  BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NULL AND begin_bdate >= ''20070101'' AND begin_bdate > (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM scores WHERE strategy_id = '+CONVERT(varchar,@STRATEGY_ID)+' UNION SELECT MIN(universe_dt) AS [bdate] FROM universe_makeup WHERE universe_id = '+CONVERT(varchar,@BM_UNIVERSE_ID)+') x) ORDER BY end_bdate DESC' END
+BEGIN
+  IF EXISTS (SELECT 1 FROM benchmark WHERE benchmark_cd = @BENCHMARK_CD)
+    BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NULL AND begin_bdate >= ''20070101'' AND begin_bdate > (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM scores WHERE strategy_id = '+CONVERT(varchar,@STRATEGY_ID)+' UNION SELECT MIN(reference_date) FROM equity_common..benchmark_weight WHERE acct_cd = '''+@BENCHMARK_CD+''') x) ORDER BY end_bdate DESC' END
+  ELSE
+    BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NULL AND begin_bdate >= ''20070101'' AND begin_bdate >= (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM scores WHERE strategy_id = '+CONVERT(varchar,@STRATEGY_ID)+' UNION SELECT MIN(universe_dt) AS [bdate] FROM universe_makeup WHERE universe_id IN (SELECT universe_id FROM universe_def WHERE universe_cd = '''+@BENCHMARK_CD+''')) x) ORDER BY end_bdate DESC' END
+END
 ELSE IF @RETURN_TYPE = 'ACCT-MODEL'
   BEGIN SELECT @SQL = @SQL + ' FROM #RESULT WHERE ordinal IS NULL AND begin_bdate >= ''20070101'' AND begin_bdate > (SELECT MAX(bdate) FROM (SELECT MIN(bdate) AS [bdate] FROM position WHERE account_cd = '''+@ACCOUNT_CD+''' UNION SELECT MIN(bdate) AS [bdate] FROM scores WHERE strategy_id = '+CONVERT(varchar,@STRATEGY_ID)+') x) ORDER BY end_bdate DESC' END
 

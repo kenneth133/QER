@@ -10,19 +10,35 @@ BEGIN
 END
 go
 CREATE PROCEDURE dbo.russell_industry_get
+@BDATE datetime
 AS
 
+IF @BDATE IS NULL
+  BEGIN SELECT 'ERROR: @BDATE IS A REQUIRED PARAMETER' RETURN -1 END
+
 CREATE TABLE #RUSSELL_INDUSTRY (
-  industry_id		int		NULL,
-  russell_industry_num	int		NULL,
+  industry_id			int			NULL,
+  russell_industry_num	int			NULL,
   russell_industry_nm	varchar(64)	NULL
 )
 
 INSERT #RUSSELL_INDUSTRY
-SELECT DISTINCT NULL, russell_industry_num, upper(russell_industry_nm)
-  FROM QER..instrument_characteristics_staging
- WHERE russell_industry_num IS NOT NULL
-   AND russell_industry_nm IS NOT NULL
+SELECT DISTINCT NULL, y.russell_industry_num, UPPER(y.russell_industry_name)
+  FROM equity_common..security y,
+      (SELECT security_id FROM universe_makeup WHERE universe_dt = @BDATE
+       UNION
+       SELECT security_id FROM equity_common..position
+        WHERE reference_date = @BDATE
+          AND reference_date = effective_date
+          AND acct_cd IN (SELECT DISTINCT a.acct_cd
+                            FROM equity_common..account a,
+                                (SELECT account_cd AS [account_cd] FROM account
+                                 UNION
+                                 SELECT benchmark_cd AS [account_cd] FROM benchmark) q
+                           WHERE a.parent = q.account_cd OR a.acct_cd = q.account_cd)) x
+ WHERE y.security_id = x.security_id
+   AND y.russell_industry_num IS NOT NULL
+   AND y.russell_industry_name IS NOT NULL
 
 UPDATE #RUSSELL_INDUSTRY
    SET industry_id = i.industry_id
