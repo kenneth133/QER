@@ -50,6 +50,7 @@ SELECT s.bdate, g.strategy_id, s.security_id,
        s.sector_score, s.segment_score, s.ss_score, s.universe_score, s.country_score, s.total_score
   FROM strategy g, #SCORES_STAGING s
  WHERE g.strategy_cd = s.strategy_cd
+   AND s.security_id IS NOT NULL
 
 DROP TABLE #SCORES_STAGING
 

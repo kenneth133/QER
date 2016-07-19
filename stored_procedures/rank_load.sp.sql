@@ -139,6 +139,7 @@ BEGIN
   INSERT rank_output (rank_event_id, security_id, factor_value, rank)
   SELECT @RANK_EVENT_ID, security_id, factor_value, rank
     FROM #RANK_STAGING
+   WHERE security_id IS NOT NULL
 END
 ELSE IF @AGAINST = 'C'
 BEGIN
@@ -148,6 +149,7 @@ BEGIN
    WHERE ss.sector_model_id = @SECTOR_MODEL_ID
      AND r.bdate = ss.bdate
      AND r.security_id = ss.security_id
+     AND r.security_id IS NOT NULL
      AND ss.sector_id = @AGAINST_ID
 END
 ELSE IF @AGAINST = 'G'
@@ -158,6 +160,7 @@ BEGIN
    WHERE ss.sector_model_id = @SECTOR_MODEL_ID
      AND r.bdate = ss.bdate
      AND r.security_id = ss.security_id
+     AND r.security_id IS NOT NULL
      AND ss.segment_id = @AGAINST_ID
 END
 
