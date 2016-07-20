@@ -22,7 +22,7 @@ IF @DATE IS NULL
 BEGIN
   SELECT @BDATE = MAX(bdate) FROM instrument_factor
    WHERE factor_id IN (SELECT factor_id FROM factor f, decode d
-                        WHERE d.item = 'FACTOR_MONITOR'
+                        WHERE d.item = 'FACTOR MONITOR FACTOR'
                           AND f.factor_cd = d.decode)
 END
 ELSE
@@ -32,18 +32,34 @@ IF @DEBUG = 1
   BEGIN SELECT '@BDATE', @BDATE END
 
 CREATE TABLE #RESULT (
-  ticker	varchar(16)	NULL,
-  cusip		varchar(32)	NULL,
-  sedol		varchar(32)	NULL,
-  isin		varchar(64)	NULL,
-  mkt_cap	float		NULL,
-  quality	int		NULL
+  security_id	int			NOT NULL,
+  ticker		varchar(16)	NULL,
+  cusip			varchar(32)	NULL,
+  sedol			varchar(32)	NULL,
+  isin			varchar(64)	NULL,
+  mkt_cap		float		NULL
 )
 
-INSERT #RESULT (ticker, cusip, sedol, isin, mkt_cap, quality)
-SELECT ticker, cusip, sedol, isin, mkt_cap, quality
-  FROM instrument_characteristics
- WHERE bdate = @BDATE
+INSERT #RESULT (security_id)
+SELECT DISTINCT p.security_id
+  FROM decode d, universe_makeup p
+ WHERE d.item = 'FACTOR MONITOR UNIVERSE'
+   AND CONVERT(int,d.code) = p.universe_id
+   AND p.universe_dt = @BDATE
+
+UPDATE #RESULT
+   SET ticker = s.ticker,
+       cusip = s.cusip,
+       sedol = s.sedol,
+       isin = s.isin
+  FROM equity_common..security s
+ WHERE #RESULT.security_id = s.security_id
+
+UPDATE #RESULT
+   SET mkt_cap = p.market_cap_usd
+  FROM equity_common..market_price p
+ WHERE #RESULT.security_id = p.security_id
+   AND p.reference_date = @BDATE
 
 IF @DEBUG = 1
 BEGIN
@@ -52,10 +68,10 @@ BEGIN
 END
 
 SELECT @NUM = 0
-WHILE EXISTS (SELECT * FROM decode WHERE item = 'FACTOR_MONITOR' AND CONVERT(int,code) > @NUM)
+WHILE EXISTS (SELECT * FROM decode WHERE item = 'FACTOR MONITOR FACTOR' AND CONVERT(int,code) > @NUM)
 BEGIN
-  SELECT @NUM = MIN(CONVERT(int,code)) FROM decode WHERE item = 'FACTOR_MONITOR' AND CONVERT(int,code) > @NUM
-  SELECT @FACTOR_CD = decode FROM decode WHERE item = 'FACTOR_MONITOR' AND CONVERT(int,code) = @NUM
+  SELECT @NUM = MIN(CONVERT(int,code)) FROM decode WHERE item = 'FACTOR MONITOR FACTOR' AND CONVERT(int,code) > @NUM
+  SELECT @FACTOR_CD = decode FROM decode WHERE item = 'FACTOR MONITOR FACTOR' AND CONVERT(int,code) = @NUM
   SELECT @SQL = 'ALTER TABLE #RESULT ADD ' + @FACTOR_CD + ' float NULL'
   IF @DEBUG=1 BEGIN SELECT '@SQL', @SQL END
   EXEC(@SQL)
@@ -65,19 +81,19 @@ BEGIN
   SELECT @SQL = @SQL + 'AND f.factor_id = i.factor_id '
   SELECT @SQL = @SQL + 'AND i.bdate = ''' + CONVERT(varchar,@BDATE,101) + ''' '
   SELECT @SQL = @SQL + 'AND i.source_cd = ''MQA'' '
-  SELECT @SQL = @SQL + 'AND #RESULT.cusip = i.cusip'
+  SELECT @SQL = @SQL + 'AND #RESULT.security_id = i.security_id'
   IF @DEBUG=1 BEGIN SELECT '@SQL', @SQL END
   EXEC(@SQL)
 END
 
 IF @DEBUG = 1
 BEGIN
-  SELECT @SQL = 'SELECT ticker, cusip, sedol, isin, mkt_cap, quality'
+  SELECT @SQL = 'SELECT security_id, ticker, cusip, sedol, isin, mkt_cap'
   SELECT @NUM = 0
-  WHILE EXISTS (SELECT * FROM decode WHERE item = 'FACTOR_MONITOR' AND CONVERT(int,code) > @NUM)
+  WHILE EXISTS (SELECT * FROM decode WHERE item = 'FACTOR MONITOR FACTOR' AND CONVERT(int,code) > @NUM)
   BEGIN
-    SELECT @NUM = MIN(CONVERT(int,code)) FROM decode WHERE item = 'FACTOR_MONITOR' AND CONVERT(int,code) > @NUM
-    SELECT @FACTOR_CD = decode FROM decode WHERE item = 'FACTOR_MONITOR' AND CONVERT(int,code) = @NUM
+    SELECT @NUM = MIN(CONVERT(int,code)) FROM decode WHERE item = 'FACTOR MONITOR FACTOR' AND CONVERT(int,code) > @NUM
+    SELECT @FACTOR_CD = decode FROM decode WHERE item = 'FACTOR MONITOR FACTOR' AND CONVERT(int,code) = @NUM
     SELECT @SQL = @SQL + ', ' + @FACTOR_CD
   END
   SELECT @SQL = @SQL + ' FROM #RESULT ORDER BY cusip'
@@ -86,12 +102,12 @@ BEGIN
   EXEC(@SQL)
 END
 
-SELECT @SQL = 'SELECT cusip, mkt_cap, quality'
+SELECT @SQL = 'SELECT SUBSTRING(cusip,1,8) AS [cusip], mkt_cap / 1000000 AS [mkt_cap]'
 SELECT @NUM = 0
-WHILE EXISTS (SELECT * FROM decode WHERE item = 'FACTOR_MONITOR' AND CONVERT(int,code) > @NUM)
+WHILE EXISTS (SELECT * FROM decode WHERE item = 'FACTOR MONITOR FACTOR' AND CONVERT(int,code) > @NUM)
 BEGIN
-  SELECT @NUM = MIN(CONVERT(int,code)) FROM decode WHERE item = 'FACTOR_MONITOR' AND CONVERT(int,code) > @NUM
-  SELECT @FACTOR_CD = decode FROM decode WHERE item = 'FACTOR_MONITOR' AND CONVERT(int,code) = @NUM
+  SELECT @NUM = MIN(CONVERT(int,code)) FROM decode WHERE item = 'FACTOR MONITOR FACTOR' AND CONVERT(int,code) > @NUM
+  SELECT @FACTOR_CD = decode FROM decode WHERE item = 'FACTOR MONITOR FACTOR' AND CONVERT(int,code) = @NUM
   SELECT @SQL = @SQL + ', ' + @FACTOR_CD
 END
 SELECT @SQL = @SQL + ' FROM #RESULT ORDER BY cusip'
