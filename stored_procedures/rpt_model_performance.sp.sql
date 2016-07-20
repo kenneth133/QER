@@ -1056,16 +1056,20 @@ DECLARE @SECTOR_NM varchar(64),
 SELECT @MAX_SECTOR_NUM = @SECTOR_NUM
 SELECT @SQL = 'SELECT period AS [Period], total_rtn AS [Total], universe_rtn AS [Universe], sector_rtn AS [Sector]'
 
-SELECT @SECTOR_NUM = 1
-WHILE @SECTOR_NUM <= @MAX_SECTOR_NUM
+SELECT @SECTOR_NUM = 0
+WHILE EXISTS (SELECT * FROM sector_def WHERE sector_model_id = @SECTOR_MODEL_ID AND sector_num > @SECTOR_NUM)
 BEGIN
-  IF EXISTS (SELECT * FROM sector_def WHERE sector_model_id = @SECTOR_MODEL_ID AND sector_num = @SECTOR_NUM)
-    BEGIN SELECT @SECTOR_NM = sector_nm FROM sector_def WHERE sector_model_id = @SECTOR_MODEL_ID AND sector_num = @SECTOR_NUM END
-  ELSE
-    BEGIN SELECT @SECTOR_NM = 'UNKNOWN' END
+  SELECT @SECTOR_NUM = MIN(sector_num) FROM sector_def
+   WHERE sector_model_id = @SECTOR_MODEL_ID
+     AND sector_num > @SECTOR_NUM
 
+  SELECT @SECTOR_NM = sector_nm FROM sector_def WHERE sector_model_id = @SECTOR_MODEL_ID AND sector_num = @SECTOR_NUM
   SELECT @SQL = @SQL + ', sector'+CONVERT(varchar,@SECTOR_NUM)+' AS ['+@SECTOR_NM+']'
-  SELECT @SECTOR_NUM = @SECTOR_NUM + 1
+END
+
+IF @SECTOR_NUM < @MAX_SECTOR_NUM
+BEGIN
+  SELECT @SQL = @SQL + ', sector'+CONVERT(varchar,@MAX_SECTOR_NUM)+' AS [UNKNOWN]'
 END
 
 IF @RETURN_TYPE = 'ACCT'
@@ -1103,16 +1107,20 @@ EXEC(@SQL)
 
 SELECT @SQL = 'SELECT begin_bdate AS [From], end_bdate AS [To], total_rtn AS [Total], universe_rtn AS [Universe], sector_rtn AS [Sector]'
 
-SELECT @SECTOR_NUM = 1
-WHILE @SECTOR_NUM <= @MAX_SECTOR_NUM
+SELECT @SECTOR_NUM = 0
+WHILE EXISTS (SELECT * FROM sector_def WHERE sector_model_id = @SECTOR_MODEL_ID AND sector_num > @SECTOR_NUM)
 BEGIN
-  IF EXISTS (SELECT * FROM sector_def WHERE sector_model_id = @SECTOR_MODEL_ID AND sector_num = @SECTOR_NUM)
-    BEGIN SELECT @SECTOR_NM = sector_nm FROM sector_def WHERE sector_model_id = @SECTOR_MODEL_ID AND sector_num = @SECTOR_NUM END
-  ELSE
-    BEGIN SELECT @SECTOR_NM = 'UNKNOWN' END
+  SELECT @SECTOR_NUM = MIN(sector_num) FROM sector_def
+   WHERE sector_model_id = @SECTOR_MODEL_ID
+     AND sector_num > @SECTOR_NUM
 
+  SELECT @SECTOR_NM = sector_nm FROM sector_def WHERE sector_model_id = @SECTOR_MODEL_ID AND sector_num = @SECTOR_NUM
   SELECT @SQL = @SQL + ', sector'+CONVERT(varchar,@SECTOR_NUM)+' AS ['+@SECTOR_NM+']'
-  SELECT @SECTOR_NUM = @SECTOR_NUM + 1
+END
+
+IF @SECTOR_NUM < @MAX_SECTOR_NUM
+BEGIN
+  SELECT @SQL = @SQL + ', sector'+CONVERT(varchar,@MAX_SECTOR_NUM)+' AS [UNKNOWN]'
 END
 
 IF @RETURN_TYPE = 'ACCT'
