@@ -29,6 +29,8 @@ BEGIN
    WHERE universe_cd = @UNIVERSE_CD
 END
 
+DECLARE @MKT_CAP_SUM float
+
 CREATE TABLE #UNIV (
   security_id	int		NULL,
   mkt_cap		float	NULL,
@@ -49,9 +51,13 @@ BEGIN
      SET mkt_cap = 0.0
    WHERE mkt_cap IS NULL
 
-  UPDATE #UNIV
-     SET weight = mkt_cap / x.[SUM_MCAP]
-    FROM (SELECT SUM(mkt_cap) AS [SUM_MCAP] FROM #UNIV) x
+  SELECT @MKT_CAP_SUM = SUM(mkt_cap)
+    FROM #UNIV
+
+  IF @MKT_CAP_SUM = 0
+    BEGIN UPDATE #UNIV SET weight = 0.0 END
+  ELSE
+    BEGIN UPDATE #UNIV SET weight = mkt_cap / @MKT_CAP_SUM END
 
   UPDATE universe_makeup
      SET weight = v.weight * 100.0
