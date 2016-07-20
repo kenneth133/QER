@@ -352,6 +352,12 @@ END
 
 DROP TABLE #TEMP
 
+INSERT #RESULT (bdate)
+SELECT bdate
+  FROM #DATE
+ WHERE bdate NOT IN (SELECT bdate FROM #RESULT)
+   AND bdate >= (SELECT MIN(bdate) FROM scores WHERE strategy_id = @STRATEGY_ID)
+
 IF @DEBUG = 1
 BEGIN
   SELECT '#RESULT (2)'
