@@ -21,9 +21,9 @@ DECLARE @USER_ID int
 
 IF @USERID IS NULL
 BEGIN
-  SELECT @USER_ID = userid
-    FROM qmetrix..azman_tbluser
-   WHERE username = SUBSTRING(system_user, CHARINDEX('\', system_user)+1, LEN(system_user)-CHARINDEX('\', system_user))
+  SELECT @USER_ID = [user_id]
+    FROM access_user
+   WHERE user_nm = system_user
 END
 ELSE
   BEGIN SELECT @USER_ID = @USERID END
@@ -31,7 +31,7 @@ ELSE
 IF @DEBUG = 1
 BEGIN
   SELECT '@USER_ID', @USER_ID
-  SELECT * FROM qmetrix..azman_tbluser WHERE UserID = @USER_ID
+  SELECT * FROM access_user WHERE [user_id] = @USER_ID
 END
 
 CREATE TABLE #GROUP ( group_id int NOT NULL )
