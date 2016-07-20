@@ -40,20 +40,21 @@ CREATE TABLE #RESULT (
   mkt_cap		float		NULL
 )
 
-INSERT #RESULT (security_id)
-SELECT DISTINCT p.security_id
-  FROM decode d, universe_makeup p
- WHERE d.item = 'FACTOR MONITOR UNIVERSE'
-   AND CONVERT(int,d.code) = p.universe_id
-   AND p.universe_dt = @BDATE
-
-UPDATE #RESULT
-   SET ticker = s.ticker,
-       cusip = s.cusip,
-       sedol = s.sedol,
-       isin = s.isin
-  FROM equity_common..security s
- WHERE #RESULT.security_id = s.security_id
+INSERT #RESULT
+SELECT y.security_id, y.ticker, y.cusip, y.sedol, y.isin, NULL
+  FROM equity_common..security y,
+      (SELECT security_id FROM universe_makeup WHERE universe_dt = @BDATE
+       UNION
+       SELECT security_id FROM equity_common..position
+        WHERE reference_date = @BDATE
+          AND reference_date = effective_date
+          AND acct_cd IN (SELECT DISTINCT a.acct_cd FROM equity_common..account a,
+                                (SELECT account_cd AS [account_cd] FROM account
+                                 UNION
+                                 SELECT benchmark_cd AS [account_cd] FROM benchmark) q
+                           WHERE a.parent = q.account_cd OR a.acct_cd = q.account_cd)) x
+ WHERE y.security_id = x.security_id
+   AND y.issue_country_cd = 'USA'
 
 UPDATE #RESULT
    SET mkt_cap = p.market_cap_usd
