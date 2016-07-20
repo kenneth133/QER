@@ -143,7 +143,7 @@ SELECT d.sector_id, NULL, p.sector_child_type, p.sector_child_id
 
 IF @DEBUG = 1
 BEGIN
-  SELECT '#NODE: AFTER INITIAL INSERTS'
+  SELECT '#NODE'
   SELECT * FROM #NODE ORDER BY sector_id, segment_id, child_type, child_id
 END
 
@@ -179,82 +179,108 @@ BEGIN
 END
 
 CREATE TABLE #LEAF (
-  sector_id	int		NULL,
-  segment_id	int		NULL,
+  sector_id		int			NULL,
+  segment_id	int			NULL,
   child_type	varchar(1)	NULL,
-  child_id	int		NULL,
-  child_num	int		NULL
+  child_id		int			NULL,
+  child_num		int			NULL
 )
 
-CREATE TABLE #TWIG (
-  sector_id	int		NULL,
-  segment_id	int		NULL,
+EXEC sector_model_tree_traverse @DEBUG = @DEBUG
+
+CREATE TABLE #LEAF_ADD (
+  sector_id		int			NULL,
+  segment_id	int			NULL,
   child_type	varchar(1)	NULL,
-  child_id	int		NULL
+  child_id		int			NULL,
+  child_num		int			NULL
 )
 
-WHILE EXISTS (SELECT * FROM #NODE)
-BEGIN
-  INSERT #LEAF
-  SELECT n.sector_id, n.segment_id, n.child_type, n.child_id, i.industry_num
-    FROM #NODE n, #RUSSELL_INDUSTRY i
-   WHERE n.child_type = 'I'
-     AND n.child_id = i.industry_id
-  UNION
-  SELECT n.sector_id, n.segment_id, n.child_type, n.child_id, b.sub_industry_num
-    FROM #NODE n, #GICS_SUB_INDUSTRY b
-   WHERE n.child_type = 'B'
-     AND n.child_id = b.sub_industry_num
+INSERT #LEAF_ADD
+SELECT * FROM #LEAF
 
-  DELETE #NODE
-    FROM #LEAF l
-   WHERE #NODE.sector_id = l.sector_id
-     AND #NODE.segment_id = l.segment_id
-     AND #NODE.child_type = l.child_type
-     AND #NODE.child_id = l.child_id
+INSERT #NODE
+SELECT p.sector_id, p.segment_id, 'C', d.sector_id
+  FROM sector_model_map p, sector_model m, sector_def d
+ WHERE p.map_id = 3
+   AND p.sector_model_id = @SECTOR_MODEL_ID
+   AND m.sector_model_cd = 'RUSSELL-S'
+   AND m.sector_model_id = d.sector_model_id
+   AND p.russell_sector_num = d.sector_num
 
-  DELETE #TWIG
-  INSERT #TWIG
-  SELECT sector_id, segment_id, child_type, child_id
-    FROM #NODE
+INSERT #NODE
+SELECT p.sector_id, p.segment_id, 'I', i.industry_id
+  FROM sector_model_map p, industry_model m, industry i
+ WHERE p.map_id = 3
+   AND p.sector_model_id = @SECTOR_MODEL_ID
+   AND m.industry_model_cd = 'RUSSELL-I'
+   AND m.industry_model_id = i.industry_model_id
+   AND p.russell_industry_num = i.industry_num
 
-  DELETE #NODE
+INSERT #NODE
+SELECT p.sector_id, p.segment_id, 'C', d.sector_id
+  FROM sector_model_map p, sector_model m, sector_def d
+ WHERE p.map_id = 3
+   AND p.sector_model_id = @SECTOR_MODEL_ID
+   AND m.sector_model_cd = 'GICS-S'
+   AND m.sector_model_id = d.sector_model_id
+   AND p.gics_sector_num = d.sector_num
 
-  INSERT #NODE
-  SELECT t.sector_id, t.segment_id, p.sector_child_type, p.sector_child_id
-    FROM #TWIG t, sector_makeup p
-   WHERE t.child_type = 'C'
-     AND p.sector_id = t.child_id
-  UNION
-  SELECT t.sector_id, t.segment_id, p.segment_child_type, p.segment_child_id
-    FROM #TWIG t, segment_makeup p
-   WHERE t.child_type = 'G'
-     AND p.segment_id = t.child_id
-  UNION
-  SELECT t.sector_id, t.segment_id, 'B', b.sub_industry_num
-    FROM #TWIG t, sub_industry b
-   WHERE t.child_type = 'I'
-     AND b.industry_id = t.child_id
-END
+INSERT #NODE
+SELECT p.sector_id, p.segment_id, 'G', g.segment_id
+  FROM sector_model_map p, sector_model m, sector_def c, segment_def g
+ WHERE p.map_id = 3
+   AND p.sector_model_id = @SECTOR_MODEL_ID
+   AND m.sector_model_cd = 'GICS-S'
+   AND m.sector_model_id = c.sector_model_id
+   AND c.sector_id = g.sector_id
+   AND p.gics_segment_num = g.segment_num
 
-IF @DEBUG = 1
-BEGIN
-  SELECT '#LEAF: AFTER LOOP'
-  SELECT * FROM #LEAF ORDER BY sector_id, segment_id, child_type, child_id
-END
+INSERT #NODE
+SELECT p.sector_id, p.segment_id, 'I', i.industry_id
+  FROM sector_model_map p, industry_model m, industry i
+ WHERE p.map_id = 3
+   AND p.sector_model_id = @SECTOR_MODEL_ID
+   AND m.industry_model_cd = 'GICS-I'
+   AND m.industry_model_id = i.industry_model_id
+   AND p.gics_industry_num = i.industry_num
 
-DROP TABLE #TWIG
+INSERT #NODE
+SELECT p.sector_id, p.segment_id, 'B', b.sub_industry_num
+  FROM sector_model_map p, industry_model m, industry i, sub_industry b
+ WHERE p.map_id = 3
+   AND p.sector_model_id = @SECTOR_MODEL_ID
+   AND m.industry_model_cd = 'GICS-I'
+   AND m.industry_model_id = i.industry_model_id
+   AND i.industry_id = b.industry_id
+   AND p.gics_sub_industry_num = b.sub_industry_num
+
+DELETE #LEAF
+
+EXEC sector_model_tree_traverse @DEBUG = @DEBUG
+
+CREATE TABLE #LEAF_REMOVE (
+  sector_id		int			NULL,
+  segment_id	int			NULL,
+  child_type	varchar(1)	NULL,
+  child_id		int			NULL,
+  child_num		int			NULL
+)
+
+INSERT #LEAF_REMOVE
+SELECT * FROM #LEAF
+
+DROP TABLE #LEAF
 DROP TABLE #NODE
 
---DELETE GICS_SUB_INDUSTRY_NUM FROM A SECTOR (1): BEGIN
-DELETE #LEAF
-  FROM sector_model_map p
- WHERE p.sector_model_id = @SECTOR_MODEL_ID
-   AND p.map_id = 3
-   AND #LEAF.sector_id = p.sector_id
-   AND #LEAF.child_type = 'B'
-   AND #LEAF.child_num = p.gics_sub_industry_num
---DELETE GICS_SUB_INDUSTRY_NUM FROM A SECTOR (1): END
+--REMOVE LEAVES (1): BEGIN
+DELETE #LEAF_ADD
+  FROM #LEAF_REMOVE r
+ WHERE #LEAF_ADD.sector_id = r.sector_id
+   AND (#LEAF_ADD.segment_id = r.segment_id OR (#LEAF_ADD.segment_id IS NULL AND r.segment_id IS NULL))
+   AND #LEAF_ADD.child_type = r.child_type
+   AND #LEAF_ADD.child_id = r.child_id
+--REMOVE LEAVES (1): END
 
 --GICS_SUB_INDUSTRY TO RUSSELL_INDUSTRY WHERE RUSSELL_INDUSTRY IS NULL: BEGIN
 IF EXISTS (SELECT * FROM sector_model_map
@@ -298,24 +324,23 @@ BEGIN
 END
 --RUSSELL_INDUSTRY TO GICS_SUB_INDUSTRY WHERE GICS_SUB_INDUSTRY IS NULL: END
 
---DELETE GICS_SUB_INDUSTRY_NUM FROM A SECTOR (2): BEGIN
-DELETE #LEAF
-  FROM sector_model_map p
- WHERE p.sector_model_id = @SECTOR_MODEL_ID
-   AND p.map_id = 3
-   AND #LEAF.sector_id = p.sector_id
-   AND #LEAF.child_type = 'B'
-   AND #LEAF.child_num = p.gics_sub_industry_num
---DELETE GICS_SUB_INDUSTRY_NUM FROM A SECTOR (2): END
+--REMOVE LEAVES (2): BEGIN
+DELETE #LEAF_ADD
+  FROM #LEAF_REMOVE r
+ WHERE #LEAF_ADD.sector_id = r.sector_id
+   AND (#LEAF_ADD.segment_id = r.segment_id OR (#LEAF_ADD.segment_id IS NULL AND r.segment_id IS NULL))
+   AND #LEAF_ADD.child_type = r.child_type
+   AND #LEAF_ADD.child_id = r.child_id
+--REMOVE LEAVES (2): END
 
 INSERT sector_model_security
 SELECT @BDATE, @SECTOR_MODEL_ID, l.sector_id, l.segment_id, s.security_id
-  FROM #LEAF l, #SEC s
+  FROM #LEAF_ADD l, #SEC s
  WHERE l.child_type = 'I'
    AND l.child_num = s.russell_industry_num
 UNION
 SELECT @BDATE, @SECTOR_MODEL_ID, l.sector_id, l.segment_id, s.security_id
-  FROM #LEAF l, #SEC s
+  FROM #LEAF_ADD l, #SEC s
  WHERE l.child_type = 'B'
    AND l.child_num = s.gics_sub_industry_num
 
@@ -368,7 +393,7 @@ SELECT DISTINCT @BDATE, @SECTOR_MODEL_ID, NULL, NULL, s.security_id
                       AND ss.security_id IS NOT NULL)
 
 DROP TABLE #SEC
-DROP TABLE #LEAF
+DROP TABLE #LEAF_ADD
 
 IF @DEBUG = 1
 BEGIN
