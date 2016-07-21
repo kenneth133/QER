@@ -96,3 +96,4 @@ ELSE
 go
 
 DROP TABLE #STRATEGY_ID
+go

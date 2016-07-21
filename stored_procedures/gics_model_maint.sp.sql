@@ -58,7 +58,7 @@ UPDATE #GICS_SEGMENT_INDUSTRY
 UPDATE #GICS_SEGMENT_INDUSTRY
    SET industry_id = i.industry_id
   FROM industry_model m, industry i
- WHERE m.industry_model_cd = 'GICS-I'
+ WHERE m.industry_model_cd = 'GICS'
    AND m.industry_model_id = i.industry_model_id
    AND i.industry_num = #GICS_SEGMENT_INDUSTRY.gics_industry_num
 

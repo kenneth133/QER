@@ -45,7 +45,7 @@ SELECT DISTINCT y.gics_industry_num, y.gics_sub_industry_num, UPPER(y.gics_sub_i
 UPDATE #GICS_SUB_INDUSTRY
    SET industry_id = i.industry_id
   FROM industry_model m, industry i
- WHERE m.industry_model_cd = 'GICS-I'
+ WHERE m.industry_model_cd = 'GICS'
    AND m.industry_model_id = i.industry_model_id
    AND i.industry_num = #GICS_SUB_INDUSTRY.gics_industry_num
 
@@ -66,7 +66,7 @@ DELETE #GICS_SUB_INDUSTRY
  WHERE gics_sub_industry_num IN (
        SELECT s.sub_industry_num
          FROM industry_model m, industry i, sub_industry s
-        WHERE m.industry_model_cd = 'GICS-I'
+        WHERE m.industry_model_cd = 'GICS'
           AND m.industry_model_id = i.industry_model_id
           AND i.industry_id = s.industry_id)
 

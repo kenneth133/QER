@@ -163,13 +163,13 @@ CREATE TABLE #GICS_SUB_INDUSTRY (
 INSERT #RUSSELL_INDUSTRY
 SELECT i.industry_id, i.industry_num
   FROM industry_model m, industry i
- WHERE m.industry_model_cd = 'RUSSELL-I'
+ WHERE m.industry_model_cd = 'RUSSELL'
    AND m.industry_model_id = i.industry_model_id
 
 INSERT #GICS_SUB_INDUSTRY
 SELECT b.sub_industry_num
   FROM industry_model m, industry i, sub_industry b
- WHERE m.industry_model_cd = 'GICS-I'
+ WHERE m.industry_model_cd = 'GICS'
    AND m.industry_model_id = i.industry_model_id
    AND i.industry_id = b.industry_id
 
@@ -217,7 +217,7 @@ SELECT p.sector_id, p.segment_id, 'I', i.industry_id
   FROM sector_model_map p, industry_model m, industry i
  WHERE p.map_id = 3
    AND p.sector_model_id = @SECTOR_MODEL_ID
-   AND m.industry_model_cd = 'RUSSELL-I'
+   AND m.industry_model_cd = 'RUSSELL'
    AND m.industry_model_id = i.industry_model_id
    AND p.russell_industry_num = i.industry_num
 
@@ -245,7 +245,7 @@ SELECT p.sector_id, p.segment_id, 'I', i.industry_id
   FROM sector_model_map p, industry_model m, industry i
  WHERE p.map_id = 3
    AND p.sector_model_id = @SECTOR_MODEL_ID
-   AND m.industry_model_cd = 'GICS-I'
+   AND m.industry_model_cd = 'GICS'
    AND m.industry_model_id = i.industry_model_id
    AND p.gics_industry_num = i.industry_num
 
@@ -254,7 +254,7 @@ SELECT p.sector_id, p.segment_id, 'B', b.sub_industry_num
   FROM sector_model_map p, industry_model m, industry i, sub_industry b
  WHERE p.map_id = 3
    AND p.sector_model_id = @SECTOR_MODEL_ID
-   AND m.industry_model_cd = 'GICS-I'
+   AND m.industry_model_cd = 'GICS'
    AND m.industry_model_id = i.industry_model_id
    AND i.industry_id = b.industry_id
    AND p.gics_sub_industry_num = b.sub_industry_num

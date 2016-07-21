@@ -181,6 +181,18 @@ BEGIN
 
   UPDATE #RANK_RESULTS
      SET weight = o.override_wgt
+    FROM factor_against_weight_override o, #RANK_PARAMETERS p, #SECURITY_CLASS s
+   WHERE #RANK_RESULTS.rank_event_id = p.rank_event_id
+     AND #RANK_RESULTS.security_id = s.security_id
+     AND o.factor_model_id = @FACTOR_MODEL_ID
+     AND o.factor_id = p.factor_id
+     AND o.against = p.against
+     AND ISNULL(o.against_id,-9999) = ISNULL(p.against_id,-9999)
+     AND o.level_type = 'R'
+     AND o.level_id = s.region_id
+
+  UPDATE #RANK_RESULTS
+     SET weight = o.override_wgt
     FROM factor_against_weight_override o, #RANK_PARAMETERS p
    WHERE #RANK_RESULTS.rank_event_id = p.rank_event_id
      AND o.factor_model_id = @FACTOR_MODEL_ID
@@ -192,8 +204,8 @@ END
 --OVERRIDE WEIGHT LOGIC: END
 
 /*
-NOTE: CURRENTLY NO CODE FOR WEIGHT OVERRIDES INVOLVING COUNTRY OR REGION;
-      WOULD REQUIRE ADDING COLUMN level_cd TO TABLE factor_against_weight_override
+NOTE: CODE FOR WEIGHT OVERRIDES INVOLVING COUNTRY AND REGION IS INCOMPLETE;
+      FOR COUNTRY, WOULD REQUIRE ADDING COLUMN level_cd TO TABLE factor_against_weight_override
 */
 
 IF @DEBUG = 1

@@ -44,7 +44,7 @@ SELECT DISTINCT NULL, y.russell_industry_num, UPPER(y.russell_industry_name)
 UPDATE #RUSSELL_INDUSTRY
    SET industry_id = i.industry_id
   FROM industry_model m, industry i
- WHERE m.industry_model_cd = 'RUSSELL-I'
+ WHERE m.industry_model_cd = 'RUSSELL'
    AND m.industry_model_id = i.industry_model_id
    AND i.industry_num = #RUSSELL_INDUSTRY.russell_industry_num
 
@@ -65,7 +65,7 @@ DELETE #RUSSELL_INDUSTRY
 INSERT industry (industry_model_id, industry_num, industry_nm)
 SELECT m.industry_model_id, r.russell_industry_num, r.russell_industry_nm
   FROM industry_model m, #RUSSELL_INDUSTRY r
- WHERE m.industry_model_cd = 'RUSSELL-I'
+ WHERE m.industry_model_cd = 'RUSSELL'
 
 DROP TABLE #RUSSELL_INDUSTRY
 

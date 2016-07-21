@@ -62,7 +62,7 @@ SELECT @MONTH_END_DT, m.industry_model_cd, i.industry_num,
    AND d.code = s.name
    AND d.decode = i.industry_nm
    AND i.industry_model_id = m.industry_model_id
-   AND m.industry_model_cd = 'BARRA-I'
+   AND m.industry_model_cd = 'BARRA'
 
 RETURN 0
 go

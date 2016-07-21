@@ -485,6 +485,17 @@ BEGIN
        AND g.factor_model_id = o.factor_model_id
        AND #RANK.factor_id = o.factor_id
        AND #RANK.against = o.against
+       AND #RANK.against = 'R'
+       AND ISNULL(y.region_id, -9999) = ISNULL(o.against_id, -9999)
+       AND o.level_type = 'G'
+       AND o.level_id = y.segment_id
+    UPDATE #RANK
+       SET weight1 = o.override_wgt
+      FROM #SECURITY y, strategy g, factor_against_weight_override o
+     WHERE g.strategy_id = @STRATEGY_ID
+       AND g.factor_model_id = o.factor_model_id
+       AND #RANK.factor_id = o.factor_id
+       AND #RANK.against = o.against
        AND #RANK.against = 'C'
        AND ISNULL(y.sector_id, -9999) = ISNULL(o.against_id, -9999)
        AND o.level_type = 'G'
@@ -518,6 +529,17 @@ BEGIN
        AND g.factor_model_id = o.factor_model_id
        AND #RANK.factor_id = o.factor_id
        AND #RANK.against = o.against
+       AND #RANK.against = 'R'
+       AND ISNULL(y.region_id, -9999) = ISNULL(o.against_id, -9999)
+       AND o.level_type = 'C'
+       AND o.level_id = y.sector_id
+    UPDATE #RANK
+       SET weight1 = o.override_wgt
+      FROM #SECURITY y, strategy g, factor_against_weight_override o
+     WHERE g.strategy_id = @STRATEGY_ID
+       AND g.factor_model_id = o.factor_model_id
+       AND #RANK.factor_id = o.factor_id
+       AND #RANK.against = o.against
        AND #RANK.against = 'C'
        AND ISNULL(y.sector_id, -9999) = ISNULL(o.against_id, -9999)
        AND o.level_type = 'C'
@@ -542,6 +564,15 @@ BEGIN
        AND #RANK.factor_id = o.factor_id
        AND #RANK.against = o.against
        AND #RANK.against = 'U'
+       AND o.level_type = 'U'
+    UPDATE #RANK
+       SET weight1 = o.override_wgt
+      FROM #SECURITY y, strategy g, factor_against_weight_override o
+     WHERE g.strategy_id = @STRATEGY_ID
+       AND g.factor_model_id = o.factor_model_id
+       AND #RANK.factor_id = o.factor_id
+       AND #RANK.against = 'R'
+       AND ISNULL(y.region_id, -9999) = ISNULL(o.against_id, -9999)
        AND o.level_type = 'U'
     UPDATE #RANK
        SET weight1 = o.override_wgt
@@ -566,8 +597,8 @@ BEGIN
   --OVERRIDE WEIGHT LOGIC: END
 
   /*
-  NOTE: CURRENTLY NO CODE FOR WEIGHT OVERRIDES INVOLVING COUNTRY OR REGION;
-        WOULD REQUIRE ADDING COLUMN level_cd TO TABLE factor_against_weight_override
+  NOTE: CODE FOR WEIGHT OVERRIDES INVOLVING COUNTRY AND REGION IS INCOMPLETE;
+        FOR COUNTRY, WOULD REQUIRE ADDING COLUMN level_cd TO TABLE factor_against_weight_override
   */
 
   IF @DEBUG = 1

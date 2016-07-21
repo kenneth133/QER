@@ -534,6 +534,18 @@ BEGIN
        AND g.factor_model_id = o.factor_model_id
        AND #RESULT2.factor_id = o.factor_id
        AND #RESULT2.against = o.against
+       AND #RESULT2.against = 'R'
+       AND ISNULL(r.region_id, -9999) = ISNULL(o.against_id, -9999)
+       AND o.level_type = 'G'
+       AND o.level_id = r.segment_id
+       AND #RESULT2.security_id = r.security_id
+    UPDATE #RESULT2
+       SET weight1 = o.override_wgt
+      FROM #RESULT r, strategy g, factor_against_weight_override o
+     WHERE g.strategy_id = @STRATEGY_ID
+       AND g.factor_model_id = o.factor_model_id
+       AND #RESULT2.factor_id = o.factor_id
+       AND #RESULT2.against = o.against
        AND #RESULT2.against = 'C'
        AND ISNULL(r.sector_id, -9999) = ISNULL(o.against_id, -9999)
        AND o.level_type = 'G'
@@ -570,6 +582,18 @@ BEGIN
        AND g.factor_model_id = o.factor_model_id
        AND #RESULT2.factor_id = o.factor_id
        AND #RESULT2.against = o.against
+       AND #RESULT2.against = 'R'
+       AND ISNULL(r.region_id, -9999) = ISNULL(o.against_id, -9999)
+       AND o.level_type = 'C'
+       AND o.level_id = r.sector_id
+       AND #RESULT2.security_id = r.security_id
+    UPDATE #RESULT2
+       SET weight1 = o.override_wgt
+      FROM #RESULT r, strategy g, factor_against_weight_override o
+     WHERE g.strategy_id = @STRATEGY_ID
+       AND g.factor_model_id = o.factor_model_id
+       AND #RESULT2.factor_id = o.factor_id
+       AND #RESULT2.against = o.against
        AND #RESULT2.against = 'C'
        AND ISNULL(r.sector_id, -9999) = ISNULL(o.against_id, -9999)
        AND o.level_type = 'C'
@@ -596,6 +620,17 @@ BEGIN
        AND #RESULT2.factor_id = o.factor_id
        AND #RESULT2.against = o.against
        AND #RESULT2.against = 'U'
+       AND o.level_type = 'U'
+       AND #RESULT2.security_id = r.security_id
+    UPDATE #RESULT2
+       SET weight1 = o.override_wgt
+      FROM #RESULT r, strategy g, factor_against_weight_override o
+     WHERE g.strategy_id = @STRATEGY_ID
+       AND g.factor_model_id = o.factor_model_id
+       AND #RESULT2.factor_id = o.factor_id
+       AND #RESULT2.against = o.against
+       AND #RESULT2.against = 'R'
+       AND ISNULL(r.region_id, -9999) = ISNULL(o.against_id, -9999)
        AND o.level_type = 'U'
        AND #RESULT2.security_id = r.security_id
     UPDATE #RESULT2
@@ -624,8 +659,8 @@ BEGIN
   --OVERRIDE WEIGHT LOGIC: END
 
   /*
-  NOTE: CURRENTLY NO CODE FOR WEIGHT OVERRIDES INVOLVING COUNTRY OR REGION;
-        WOULD REQUIRE ADDING COLUMN level_cd TO TABLE factor_against_weight_override
+  NOTE: CODE FOR WEIGHT OVERRIDES INVOLVING COUNTRY AND REGION IS INCOMPLETE;
+        FOR COUNTRY, WOULD REQUIRE ADDING COLUMN level_cd TO TABLE factor_against_weight_override
   */
 
   IF @DEBUG = 1

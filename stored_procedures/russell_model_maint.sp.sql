@@ -55,7 +55,7 @@ UPDATE #RUSSELL_SECTOR_INDUSTRY
 UPDATE #RUSSELL_SECTOR_INDUSTRY
    SET industry_id = i.industry_id
   FROM industry_model m, industry i
- WHERE m.industry_model_cd = 'RUSSELL-I'
+ WHERE m.industry_model_cd = 'RUSSELL'
    AND m.industry_model_id = i.industry_model_id
    AND i.industry_num = #RUSSELL_SECTOR_INDUSTRY.russell_industry_num
 

@@ -186,7 +186,7 @@ UPDATE #RESULT
 UPDATE #RESULT
    SET russell_industry_nm = i.industry_nm
   FROM industry_model m, industry i
- WHERE m.industry_model_cd = 'RUSSELL-I'
+ WHERE m.industry_model_cd = 'RUSSELL'
    AND m.industry_model_id = i.industry_model_id
    AND i.industry_num = #RESULT.russell_industry_num
 
@@ -208,14 +208,14 @@ UPDATE #RESULT
 UPDATE #RESULT
    SET gics_industry_nm = i.industry_nm
   FROM industry_model m, industry i
- WHERE m.industry_model_cd = 'GICS-I'
+ WHERE m.industry_model_cd = 'GICS'
    AND m.industry_model_id = i.industry_model_id
    AND i.industry_num = #RESULT.gics_industry_num
 
 UPDATE #RESULT
    SET gics_sub_industry_nm = b.sub_industry_nm
   FROM industry_model m, industry i, sub_industry b
- WHERE m.industry_model_cd = 'GICS-I'
+ WHERE m.industry_model_cd = 'GICS'
    AND m.industry_model_id = i.industry_model_id
    AND i.industry_id = b.industry_id
    AND b.sub_industry_num = #RESULT.gics_sub_industry_num

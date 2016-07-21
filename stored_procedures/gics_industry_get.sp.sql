@@ -44,7 +44,7 @@ SELECT DISTINCT NULL, y.gics_industry_num, UPPER(y.gics_industry_name)
 UPDATE #GICS_INDUSTRY
    SET industry_id = i.industry_id
   FROM industry_model m, industry i
- WHERE m.industry_model_cd = 'GICS-I'
+ WHERE m.industry_model_cd = 'GICS'
    AND m.industry_model_id = i.industry_model_id
    AND i.industry_num = #GICS_INDUSTRY.gics_industry_num
 
@@ -65,7 +65,7 @@ DELETE #GICS_INDUSTRY
 INSERT industry (industry_model_id, industry_num, industry_nm)
 SELECT m.industry_model_id, g.gics_industry_num, g.gics_industry_nm
   FROM industry_model m, #GICS_INDUSTRY g
- WHERE m.industry_model_cd = 'GICS-I'
+ WHERE m.industry_model_cd = 'GICS'
 
 DROP TABLE #GICS_INDUSTRY
 
