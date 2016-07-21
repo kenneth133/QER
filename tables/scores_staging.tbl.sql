@@ -10,10 +10,10 @@ create table dbo.scores_staging (
   strategy_cd	varchar(16)		NULL,
 
   mqa_id		varchar(32)		NULL,
-  ticker		varchar(32)		NULL,
+  ticker		varchar(16)		NULL,
   cusip			varchar(32)		NULL,
   sedol			varchar(32)		NULL,
-  isin			varchar(32)		NULL,
+  isin			varchar(64)		NULL,
   currency_cd	varchar(3)		NULL,
   exchange_nm	varchar(60)		NULL,
 
