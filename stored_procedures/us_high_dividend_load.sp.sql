@@ -11,6 +11,7 @@ END
 go
 CREATE PROCEDURE dbo.us_high_dividend_load
 @BDATE datetime,
+@DELETE_FLAG bit = 0,
 @DEBUG bit = NULL
 AS
 
@@ -75,8 +76,20 @@ BEGIN
   SELECT * FROM #USHD_SECURITY_ID ORDER BY cusip, sedol
 END
 
-DELETE us_high_dividend
- WHERE bdate = @BDATE
+IF @DELETE_FLAG = 1
+BEGIN
+  DELETE us_high_dividend
+   WHERE bdate = @BDATE
+END
+ELSE
+BEGIN
+  DELETE us_high_dividend
+    FROM #USHD_SECURITY_ID i, us_high_dividend_staging s
+   WHERE us_high_dividend.bdate = @BDATE
+     AND us_high_dividend.security_id = i.security_id
+     AND i.cusip = equity_common.dbo.fnCusipIncludeCheckDigit(s.cusip)
+     AND i.sedol = equity_common.dbo.fnSedolIncludeCheckDigit(s.sedol)
+END
 
 INSERT us_high_dividend
 SELECT @BDATE, i.security_id,
@@ -91,7 +104,8 @@ SELECT @BDATE, i.security_id,
        s.sp_current_rating,
        s.sp_senior_rating
   FROM #USHD_SECURITY_ID i, us_high_dividend_staging s
- WHERE i.cusip = equity_common.dbo.fnCusipIncludeCheckDigit(s.cusip)
+ WHERE i.security_id IS NOT NULL
+   AND i.cusip = equity_common.dbo.fnCusipIncludeCheckDigit(s.cusip)
    AND i.sedol = equity_common.dbo.fnSedolIncludeCheckDigit(s.sedol)
 
 DROP TABLE #USHD_SECURITY_ID
