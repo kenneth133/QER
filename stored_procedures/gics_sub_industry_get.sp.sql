@@ -31,12 +31,13 @@ SELECT DISTINCT y.gics_industry_num, y.gics_sub_industry_num, UPPER(y.gics_sub_i
        SELECT security_id FROM equity_common..position
         WHERE reference_date = @BDATE
           AND reference_date = effective_date
-          AND acct_cd IN (SELECT DISTINCT a.acct_cd
-                            FROM equity_common..account a,
-                                (SELECT account_cd AS [account_cd] FROM account
-                                 UNION
-                                 SELECT benchmark_cd AS [account_cd] FROM benchmark) q
-                           WHERE a.parent = q.account_cd OR a.acct_cd = q.account_cd)) x
+          AND acct_cd IN (SELECT acct_cd AS [account_cd] FROM equity_common..account
+                           WHERE parent IN (SELECT account_cd FROM account)
+                          UNION
+                          SELECT acct_cd AS [account_cd] FROM equity_common..account
+                           WHERE acct_cd IN (SELECT account_cd FROM account)
+                          UNION
+                          SELECT benchmark_cd AS [account_cd] FROM account)) x
  WHERE y.security_id = x.security_id
    AND y.gics_sub_industry_num IS NOT NULL
    AND y.gics_sub_industry_name IS NOT NULL

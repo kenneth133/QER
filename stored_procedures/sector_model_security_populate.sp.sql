@@ -54,7 +54,9 @@ BEGIN
     FROM equity_common..security y, equity_common..position p
    WHERE p.reference_date = @UNIVERSE_DT
      AND p.reference_date = p.effective_date
-     AND p.acct_cd IN (SELECT DISTINCT acct_cd FROM equity_common..account WHERE parent = @UNIVERSE_CD OR acct_cd = @UNIVERSE_CD)
+     AND p.acct_cd IN (SELECT acct_cd FROM equity_common..account WHERE parent = @UNIVERSE_CD
+                       UNION
+                       SELECT acct_cd FROM equity_common..account WHERE acct_cd = @UNIVERSE_CD)
      AND p.security_id = y.security_id
      AND p.security_id IS NOT NULL
      AND NOT EXISTS (SELECT 1 FROM sector_model_security ss
@@ -88,9 +90,11 @@ BEGIN
          SELECT security_id FROM equity_common..position
           WHERE reference_date = @UNIVERSE_DT
             AND reference_date = effective_date
-            AND acct_cd IN (SELECT DISTINCT a.acct_cd
-                              FROM equity_common..account a, benchmark b
-                             WHERE a.parent = b.benchmark_cd OR a.acct_cd = b.benchmark_cd)
+            AND acct_cd IN (SELECT a1.acct_cd FROM equity_common..account a1, benchmark b1
+                             WHERE a1.parent = b1.benchmark_cd
+                            UNION
+                            SELECT a2.acct_cd FROM equity_common..account a2, benchmark b2
+                             WHERE a2.acct_cd = b2.benchmark_cd)
             AND security_id IS NOT NULL) x
    WHERE x.security_id = y.security_id
      AND NOT EXISTS (SELECT 1 FROM sector_model_security ss
@@ -106,7 +110,7 @@ BEGIN
   SELECT * FROM #SEC ORDER BY security_id
 END
 
-IF NOT EXISTS (SELECT * FROM #SEC)
+IF NOT EXISTS (SELECT 1 FROM #SEC)
 BEGIN
   DROP TABLE #SEC
   RETURN 0
@@ -277,13 +281,13 @@ DROP TABLE #NODE
 DELETE #LEAF_ADD
   FROM #LEAF_REMOVE r
  WHERE #LEAF_ADD.sector_id = r.sector_id
-   AND (#LEAF_ADD.segment_id = r.segment_id OR (#LEAF_ADD.segment_id IS NULL AND r.segment_id IS NULL))
+   AND ISNULL(#LEAF_ADD.segment_id,-9999) = ISNULL(r.segment_id,-9999)
    AND #LEAF_ADD.child_type = r.child_type
    AND #LEAF_ADD.child_id = r.child_id
 --REMOVE LEAVES (1): END
 
 --GICS_SUB_INDUSTRY TO RUSSELL_INDUSTRY WHERE RUSSELL_INDUSTRY IS NULL: BEGIN
-IF EXISTS (SELECT * FROM sector_model_map
+IF EXISTS (SELECT 1 FROM sector_model_map
             WHERE sector_model_id = @SECTOR_MODEL_ID
               AND map_id = 1)
 BEGIN
@@ -304,7 +308,7 @@ END
 --GICS_SUB_INDUSTRY TO RUSSELL_INDUSTRY WHERE RUSSELL_INDUSTRY IS NULL: END
 
 --RUSSELL_INDUSTRY TO GICS_SUB_INDUSTRY WHERE GICS_SUB_INDUSTRY IS NULL: BEGIN
-IF EXISTS (SELECT * FROM sector_model_map
+IF EXISTS (SELECT 1 FROM sector_model_map
             WHERE sector_model_id = @SECTOR_MODEL_ID
               AND map_id = 2)
 BEGIN
@@ -328,7 +332,7 @@ END
 DELETE #LEAF_ADD
   FROM #LEAF_REMOVE r
  WHERE #LEAF_ADD.sector_id = r.sector_id
-   AND (#LEAF_ADD.segment_id = r.segment_id OR (#LEAF_ADD.segment_id IS NULL AND r.segment_id IS NULL))
+   AND ISNULL(#LEAF_ADD.segment_id,-9999) = ISNULL(r.segment_id,-9999)
    AND #LEAF_ADD.child_type = r.child_type
    AND #LEAF_ADD.child_id = r.child_id
 --REMOVE LEAVES (2): END
@@ -354,7 +358,7 @@ BEGIN
 END
 
 --SECURITY EXCEPTIONS LOGIC (WITH NO OVERRIDE): BEGIN
-IF EXISTS (SELECT * FROM sector_model_security_exception
+IF EXISTS (SELECT 1 FROM sector_model_security_exception
             WHERE sector_model_id = @SECTOR_MODEL_ID
               AND override != 1)
 BEGIN
@@ -405,7 +409,7 @@ BEGIN
 END
 
 --SECURITY EXCEPTIONS LOGIC (WITH OVERRIDE): BEGIN
-IF EXISTS (SELECT * FROM sector_model_security_exception
+IF EXISTS (SELECT 1 FROM sector_model_security_exception
             WHERE sector_model_id = @SECTOR_MODEL_ID
               AND override = 1)
 BEGIN

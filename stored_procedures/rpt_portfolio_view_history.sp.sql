@@ -9,12 +9,13 @@ BEGIN
         PRINT '<<< DROPPED PROCEDURE dbo.rpt_portfolio_view_history >>>'
 END
 go
-CREATE PROCEDURE dbo.rpt_portfolio_view_history @BDATE datetime,
-                                                @STRATEGY_ID int,
-                                                @ACCOUNT_CD varchar(32),
-                                                @PERIODS int,
-                                                @PERIOD_TYPE varchar(2),
-                                                @DEBUG bit = NULL
+CREATE PROCEDURE dbo.rpt_portfolio_view_history
+@BDATE datetime,
+@STRATEGY_ID int,
+@ACCOUNT_CD varchar(32),
+@PERIODS int,
+@PERIOD_TYPE varchar(2),
+@DEBUG bit = NULL
 AS
 /* PORTFOLIO - RANKS */
 
@@ -92,113 +93,187 @@ CREATE TABLE #POSITION_SCORES (
   mval			float		NULL,
   weight		float		NULL,
 
-  total_score		float		NULL,
-  universe_score	float		NULL,
-  sector_score		float		NULL,
-  segment_score		float		NULL,
+  total_score		float	NULL,
+  universe_score	float	NULL,
+  region_score		float	NULL,
+  country_score		float	NULL,
+  ss_score			float	NULL,
+  sector_score		float	NULL,
+  segment_score		float	NULL,
 
-  wgt_total			float		NULL,
-  wgt_universe		float		NULL,
-  wgt_sector		float		NULL,
-  wgt_segment		float		NULL
+  wgt_total			float	NULL,
+  wgt_universe		float	NULL,
+  wgt_region		float	NULL,
+  wgt_country		float	NULL,
+  wgt_ss			float	NULL,
+  wgt_sector		float	NULL,
+  wgt_segment		float	NULL
 )
 
-INSERT #POSITION_SCORES (bdate, security_id, units, total_score, universe_score, sector_score, segment_score)
-SELECT s.bdate, s.security_id, x.quantity, s.total_score, s.universe_score, s.sector_score, s.segment_score
-  FROM scores s,
-      (SELECT reference_date, security_id, SUM(ISNULL(quantity,0.0)) AS [quantity]
-         FROM equity_common..position
-        WHERE reference_date IN (SELECT DISTINCT bdate FROM #DATE)
-          AND reference_date = effective_date
-          AND acct_cd IN (SELECT DISTINCT acct_cd FROM equity_common..account WHERE parent = @ACCOUNT_CD OR acct_cd = @ACCOUNT_CD)
-        GROUP BY reference_date, security_id) x
- WHERE s.strategy_id = @STRATEGY_ID
-   AND s.bdate = x.reference_date
-   AND s.security_id = x.security_id
+INSERT #POSITION_SCORES (bdate, security_id, units, price, weight)
+SELECT reference_date, security_id, SUM(ISNULL(quantity,0.0)), 0.0, 0.0
+  FROM equity_common..position
+ WHERE reference_date IN (SELECT DISTINCT bdate FROM #DATE WHERE bdate >= (SELECT MIN(bdate) FROM scores WHERE strategy_id = @STRATEGY_ID))
+   AND reference_date = effective_date
+   AND acct_cd IN (SELECT acct_cd FROM equity_common..account WHERE parent = @ACCOUNT_CD
+                   UNION
+                   SELECT acct_cd FROM equity_common..account WHERE acct_cd = @ACCOUNT_CD)
+ GROUP BY reference_date, security_id
 
 UPDATE #POSITION_SCORES
-   SET price = p.price_close_usd
+   SET price = ISNULL(p.price_close_usd,0.0)
   FROM equity_common..market_price p
- WHERE #POSITION_SCORES.security_id = p.security_id
-   AND #POSITION_SCORES.bdate = p.reference_date
+ WHERE #POSITION_SCORES.bdate = p.reference_date
+   AND #POSITION_SCORES.security_id = p.security_id
 
 UPDATE #POSITION_SCORES
    SET mval = units * price
 
-DELETE #POSITION_SCORES
- WHERE mval IS NULL
-    OR mval = 0.0
-
 UPDATE #POSITION_SCORES
-   SET weight = mval / x.tot_mval
-  FROM (SELECT bdate, SUM(mval) AS tot_mval
-          FROM #POSITION_SCORES
-         WHERE total_score IS NOT NULL
-         GROUP BY bdate) x
- WHERE #POSITION_SCORES.bdate = x.bdate
-   AND total_score IS NOT NULL
-
-UPDATE #POSITION_SCORES
-   SET wgt_total = total_score * weight
-
-UPDATE #POSITION_SCORES
-   SET weight = mval / x.tot_mval
-  FROM (SELECT bdate, SUM(mval) AS tot_mval
-          FROM #POSITION_SCORES
-         WHERE universe_score IS NOT NULL
-         GROUP BY bdate) x
- WHERE #POSITION_SCORES.bdate = x.bdate
-   AND universe_score IS NOT NULL
-
-UPDATE #POSITION_SCORES
-   SET wgt_universe = universe_score * weight
-
-UPDATE #POSITION_SCORES
-   SET weight = mval / x.tot_mval
-  FROM (SELECT bdate, SUM(mval) AS tot_mval
-          FROM #POSITION_SCORES
-         WHERE sector_score IS NOT NULL
-         GROUP BY bdate) x
- WHERE #POSITION_SCORES.bdate = x.bdate
-   AND sector_score IS NOT NULL
-
-UPDATE #POSITION_SCORES
-   SET wgt_sector = sector_score * weight
-
-UPDATE #POSITION_SCORES
-   SET weight = mval / x.tot_mval
-  FROM (SELECT bdate, SUM(mval) AS tot_mval
-          FROM #POSITION_SCORES
-         WHERE segment_score IS NOT NULL
-         GROUP BY bdate) x
- WHERE #POSITION_SCORES.bdate = x.bdate
-   AND segment_score IS NOT NULL
-
-UPDATE #POSITION_SCORES
-   SET wgt_segment = segment_score * weight
+   SET total_score = s.total_score,
+       universe_score = s.universe_score,
+       region_score = s.region_score,
+       country_score = s.country_score,
+       ss_score = s.ss_score,
+       sector_score = s.sector_score,
+       segment_score = s.segment_score
+  FROM scores s
+ WHERE #POSITION_SCORES.bdate = s.bdate
+   AND s.strategy_id = @STRATEGY_ID
+   AND #POSITION_SCORES.security_id = s.security_id
 
 IF @DEBUG = 1
 BEGIN
-  SELECT '#POSITION_SCORES'
+  SELECT '#POSITION_SCORES (1)'
+  SELECT * FROM #POSITION_SCORES ORDER BY bdate, security_id
+END
+
+UPDATE #POSITION_SCORES
+   SET weight = mval / x.tot_mval
+  FROM (SELECT bdate, SUM(mval) AS tot_mval FROM #POSITION_SCORES
+         WHERE total_score IS NOT NULL GROUP BY bdate) x
+ WHERE #POSITION_SCORES.bdate = x.bdate
+   AND #POSITION_SCORES.total_score IS NOT NULL
+   AND x.tot_mval != 0.0
+
+UPDATE #POSITION_SCORES
+   SET wgt_total = total_score * weight
+ WHERE total_score IS NOT NULL
+
+UPDATE #POSITION_SCORES SET weight = 0.0
+
+UPDATE #POSITION_SCORES
+   SET weight = mval / x.tot_mval
+  FROM (SELECT bdate, SUM(mval) AS tot_mval FROM #POSITION_SCORES
+         WHERE universe_score IS NOT NULL GROUP BY bdate) x
+ WHERE #POSITION_SCORES.bdate = x.bdate
+   AND #POSITION_SCORES.universe_score IS NOT NULL
+   AND x.tot_mval != 0.0
+
+UPDATE #POSITION_SCORES
+   SET wgt_universe = universe_score * weight
+ WHERE universe_score IS NOT NULL
+
+UPDATE #POSITION_SCORES SET weight = 0.0
+
+UPDATE #POSITION_SCORES
+   SET weight = mval / x.tot_mval
+  FROM (SELECT bdate, SUM(mval) AS tot_mval FROM #POSITION_SCORES
+         WHERE region_score IS NOT NULL GROUP BY bdate) x
+ WHERE #POSITION_SCORES.bdate = x.bdate
+   AND #POSITION_SCORES.region_score IS NOT NULL
+   AND x.tot_mval != 0.0
+
+UPDATE #POSITION_SCORES
+   SET wgt_region = region_score * weight
+ WHERE region_score IS NOT NULL
+
+UPDATE #POSITION_SCORES SET weight = 0.0
+
+UPDATE #POSITION_SCORES
+   SET weight = mval / x.tot_mval
+  FROM (SELECT bdate, SUM(mval) AS tot_mval FROM #POSITION_SCORES
+         WHERE country_score IS NOT NULL GROUP BY bdate) x
+ WHERE #POSITION_SCORES.bdate = x.bdate
+   AND #POSITION_SCORES.country_score IS NOT NULL
+   AND x.tot_mval != 0.0
+
+UPDATE #POSITION_SCORES
+   SET wgt_country = country_score * weight
+ WHERE country_score IS NOT NULL
+
+UPDATE #POSITION_SCORES SET weight = 0.0
+
+UPDATE #POSITION_SCORES
+   SET weight = mval / x.tot_mval
+  FROM (SELECT bdate, SUM(mval) AS tot_mval FROM #POSITION_SCORES
+         WHERE ss_score IS NOT NULL GROUP BY bdate) x
+ WHERE #POSITION_SCORES.bdate = x.bdate
+   AND #POSITION_SCORES.ss_score IS NOT NULL
+   AND x.tot_mval != 0.0
+
+UPDATE #POSITION_SCORES
+   SET wgt_ss = ss_score * weight
+ WHERE ss_score IS NOT NULL
+
+UPDATE #POSITION_SCORES SET weight = 0.0
+
+UPDATE #POSITION_SCORES
+   SET weight = mval / x.tot_mval
+  FROM (SELECT bdate, SUM(mval) AS tot_mval FROM #POSITION_SCORES
+         WHERE sector_score IS NOT NULL GROUP BY bdate) x
+ WHERE #POSITION_SCORES.bdate = x.bdate
+   AND #POSITION_SCORES.sector_score IS NOT NULL
+   AND x.tot_mval != 0.0
+
+UPDATE #POSITION_SCORES
+   SET wgt_sector = sector_score * weight
+ WHERE sector_score IS NOT NULL
+
+UPDATE #POSITION_SCORES SET weight = 0.0
+
+UPDATE #POSITION_SCORES
+   SET weight = mval / x.tot_mval
+  FROM (SELECT bdate, SUM(mval) AS tot_mval FROM #POSITION_SCORES
+         WHERE segment_score IS NOT NULL GROUP BY bdate) x
+ WHERE #POSITION_SCORES.bdate = x.bdate
+   AND #POSITION_SCORES.segment_score IS NOT NULL
+   AND x.tot_mval != 0.0
+
+UPDATE #POSITION_SCORES
+   SET wgt_segment = segment_score * weight
+ WHERE segment_score IS NOT NULL
+
+IF @DEBUG = 1
+BEGIN
+  SELECT '#POSITION_SCORES (2)'
   SELECT * FROM #POSITION_SCORES ORDER BY bdate, security_id
 END
 
 CREATE TABLE #RESULT (
+  ordinal			int identity(1,1) NOT NULL,
   bdate				datetime	NULL,
   total_wgt_avg		float		NULL,
   total_median		float		NULL,
   universe_wgt_avg	float		NULL,
   universe_median	float		NULL,
+  region_wgt_avg	float		NULL,
+  region_median		float		NULL,
+  country_wgt_avg	float		NULL,
+  country_median	float		NULL,
+  ss_wgt_avg		float		NULL,
+  ss_median			float		NULL,
   sector_wgt_avg	float		NULL,
   sector_median		float		NULL,
   segment_wgt_avg	float		NULL,
   segment_median	float		NULL
 )
 
-INSERT #RESULT (bdate, total_wgt_avg, universe_wgt_avg, sector_wgt_avg, segment_wgt_avg)
-SELECT bdate, SUM(wgt_total), SUM(wgt_universe), SUM(wgt_sector), SUM(wgt_segment)
+INSERT #RESULT (bdate, total_wgt_avg, universe_wgt_avg, region_wgt_avg, country_wgt_avg, ss_wgt_avg, sector_wgt_avg, segment_wgt_avg)
+SELECT bdate, SUM(wgt_total), SUM(wgt_universe), SUM(wgt_region), SUM(wgt_country), SUM(wgt_ss), SUM(wgt_sector), SUM(wgt_segment)
   FROM #POSITION_SCORES
  GROUP BY bdate
+ ORDER BY bdate
 
 IF @DEBUG = 1
 BEGIN
@@ -206,157 +281,176 @@ BEGIN
   SELECT * FROM #RESULT ORDER BY bdate
 END
 
-DECLARE @MEDIAN_SCORE float
-
 CREATE TABLE #TEMP (
   ordinal	int identity(1,1)	NOT NULL,
   score		float				NOT NULL
 )
 
-WHILE EXISTS (SELECT * FROM #RESULT WHERE total_median IS NULL)
+DECLARE
+@ORDINAL int,
+@MEDIAN_SCORE float
+
+SELECT @ORDINAL = 0
+WHILE EXISTS (SELECT 1 FROM #RESULT WHERE ordinal > @ORDINAL)
 BEGIN
-  SELECT @BDATE = MIN(bdate) FROM #RESULT WHERE total_median IS NULL
-  --TOTAL
+  SELECT @ORDINAL = MIN(ordinal) FROM #RESULT WHERE ordinal > @ORDINAL
+  SELECT @BDATE = bdate FROM #RESULT where ordinal = @ORDINAL
+
+  SELECT @MEDIAN_SCORE = NULL
+  TRUNCATE TABLE #TEMP
+
   INSERT #TEMP (score)
-  SELECT total_score
-    FROM #POSITION_SCORES
-   WHERE bdate = @BDATE
-     AND total_score IS NOT NULL
+  SELECT total_score FROM #POSITION_SCORES
+   WHERE bdate = @BDATE AND total_score IS NOT NULL
    ORDER BY total_score
 
   IF (SELECT MAX(ordinal) FROM #TEMP) % 2 = 0
   BEGIN
-    SELECT @MEDIAN_SCORE = score
-      FROM #TEMP
-     WHERE ordinal = (SELECT MAX(ordinal)/2.0 FROM #TEMP)
-
-    SELECT @MEDIAN_SCORE = @MEDIAN_SCORE + score
-      FROM #TEMP
-     WHERE ordinal = (SELECT MAX(ordinal)/2.0 + 1 FROM #TEMP)
-
+    SELECT @MEDIAN_SCORE = score FROM #TEMP WHERE ordinal = (SELECT MAX(ordinal)/2.0 FROM #TEMP)
+    SELECT @MEDIAN_SCORE = @MEDIAN_SCORE + score FROM #TEMP WHERE ordinal = (SELECT MAX(ordinal)/2.0 + 1 FROM #TEMP)
     SELECT @MEDIAN_SCORE = @MEDIAN_SCORE / 2.0
   END
   ELSE
   BEGIN
-    SELECT @MEDIAN_SCORE = score
-      FROM #TEMP
-     WHERE ordinal = CEILING((SELECT MAX(ordinal) FROM #TEMP)/2.0)
+    SELECT @MEDIAN_SCORE = score FROM #TEMP WHERE ordinal = CEILING((SELECT MAX(ordinal) FROM #TEMP)/2.0)
   END
 
-  UPDATE #RESULT
-     SET total_median = @MEDIAN_SCORE
-    WHERE bdate = @BDATE
+  UPDATE #RESULT SET total_median = @MEDIAN_SCORE WHERE ordinal = @ORDINAL
 
   SELECT @MEDIAN_SCORE = NULL
   TRUNCATE TABLE #TEMP
-  --UNIVERSE
+
   INSERT #TEMP (score)
-  SELECT universe_score
-    FROM #POSITION_SCORES
-   WHERE bdate = @BDATE
-     AND universe_score IS NOT NULL
+  SELECT universe_score FROM #POSITION_SCORES
+   WHERE bdate = @BDATE AND universe_score IS NOT NULL
    ORDER BY universe_score
 
   IF (SELECT MAX(ordinal) FROM #TEMP) % 2 = 0
   BEGIN
-    SELECT @MEDIAN_SCORE = score
-      FROM #TEMP
-     WHERE ordinal = (SELECT MAX(ordinal)/2.0 FROM #TEMP)
-
-    SELECT @MEDIAN_SCORE = @MEDIAN_SCORE + score
-      FROM #TEMP
-     WHERE ordinal = (SELECT MAX(ordinal)/2.0 + 1 FROM #TEMP)
-
+    SELECT @MEDIAN_SCORE = score FROM #TEMP WHERE ordinal = (SELECT MAX(ordinal)/2.0 FROM #TEMP)
+    SELECT @MEDIAN_SCORE = @MEDIAN_SCORE + score FROM #TEMP WHERE ordinal = (SELECT MAX(ordinal)/2.0 + 1 FROM #TEMP)
     SELECT @MEDIAN_SCORE = @MEDIAN_SCORE / 2.0
   END
   ELSE
   BEGIN
-    SELECT @MEDIAN_SCORE = score
-      FROM #TEMP
-     WHERE ordinal = CEILING((SELECT MAX(ordinal) FROM #TEMP)/2.0)
+    SELECT @MEDIAN_SCORE = score FROM #TEMP WHERE ordinal = CEILING((SELECT MAX(ordinal) FROM #TEMP)/2.0)
   END
 
-  UPDATE #RESULT
-     SET universe_median = @MEDIAN_SCORE
-    WHERE bdate = @BDATE
+  UPDATE #RESULT SET universe_median = @MEDIAN_SCORE WHERE ordinal = @ORDINAL
 
   SELECT @MEDIAN_SCORE = NULL
   TRUNCATE TABLE #TEMP
-  --SECTOR
+
   INSERT #TEMP (score)
-  SELECT sector_score
-    FROM #POSITION_SCORES
-   WHERE bdate = @BDATE
-     AND sector_score IS NOT NULL
+  SELECT region_score FROM #POSITION_SCORES
+   WHERE bdate = @BDATE AND region_score IS NOT NULL
+   ORDER BY region_score
+
+  IF (SELECT MAX(ordinal) FROM #TEMP) % 2 = 0
+  BEGIN
+    SELECT @MEDIAN_SCORE = score FROM #TEMP WHERE ordinal = (SELECT MAX(ordinal)/2.0 FROM #TEMP)
+    SELECT @MEDIAN_SCORE = @MEDIAN_SCORE + score FROM #TEMP WHERE ordinal = (SELECT MAX(ordinal)/2.0 + 1 FROM #TEMP)
+    SELECT @MEDIAN_SCORE = @MEDIAN_SCORE / 2.0
+  END
+  ELSE
+  BEGIN
+    SELECT @MEDIAN_SCORE = score FROM #TEMP WHERE ordinal = CEILING((SELECT MAX(ordinal) FROM #TEMP)/2.0)
+  END
+
+  UPDATE #RESULT SET region_median = @MEDIAN_SCORE WHERE ordinal = @ORDINAL
+
+  SELECT @MEDIAN_SCORE = NULL
+  TRUNCATE TABLE #TEMP
+
+  INSERT #TEMP (score)
+  SELECT country_score FROM #POSITION_SCORES
+   WHERE bdate = @BDATE AND country_score IS NOT NULL
+   ORDER BY country_score
+
+  IF (SELECT MAX(ordinal) FROM #TEMP) % 2 = 0
+  BEGIN
+    SELECT @MEDIAN_SCORE = score FROM #TEMP WHERE ordinal = (SELECT MAX(ordinal)/2.0 FROM #TEMP)
+    SELECT @MEDIAN_SCORE = @MEDIAN_SCORE + score FROM #TEMP WHERE ordinal = (SELECT MAX(ordinal)/2.0 + 1 FROM #TEMP)
+    SELECT @MEDIAN_SCORE = @MEDIAN_SCORE / 2.0
+  END
+  ELSE
+  BEGIN
+    SELECT @MEDIAN_SCORE = score FROM #TEMP WHERE ordinal = CEILING((SELECT MAX(ordinal) FROM #TEMP)/2.0)
+  END
+
+  UPDATE #RESULT SET country_median = @MEDIAN_SCORE WHERE ordinal = @ORDINAL
+
+  SELECT @MEDIAN_SCORE = NULL
+  TRUNCATE TABLE #TEMP
+
+  INSERT #TEMP (score)
+  SELECT ss_score FROM #POSITION_SCORES
+   WHERE bdate = @BDATE AND ss_score IS NOT NULL
+   ORDER BY ss_score
+
+  IF (SELECT MAX(ordinal) FROM #TEMP) % 2 = 0
+  BEGIN
+    SELECT @MEDIAN_SCORE = score FROM #TEMP WHERE ordinal = (SELECT MAX(ordinal)/2.0 FROM #TEMP)
+    SELECT @MEDIAN_SCORE = @MEDIAN_SCORE + score FROM #TEMP WHERE ordinal = (SELECT MAX(ordinal)/2.0 + 1 FROM #TEMP)
+    SELECT @MEDIAN_SCORE = @MEDIAN_SCORE / 2.0
+  END
+  ELSE
+  BEGIN
+    SELECT @MEDIAN_SCORE = score FROM #TEMP WHERE ordinal = CEILING((SELECT MAX(ordinal) FROM #TEMP)/2.0)
+  END
+
+  UPDATE #RESULT SET ss_median = @MEDIAN_SCORE WHERE ordinal = @ORDINAL
+
+  SELECT @MEDIAN_SCORE = NULL
+  TRUNCATE TABLE #TEMP
+
+  INSERT #TEMP (score)
+  SELECT sector_score FROM #POSITION_SCORES
+   WHERE bdate = @BDATE AND sector_score IS NOT NULL
    ORDER BY sector_score
 
   IF (SELECT MAX(ordinal) FROM #TEMP) % 2 = 0
   BEGIN
-    SELECT @MEDIAN_SCORE = score
-      FROM #TEMP
-     WHERE ordinal = (SELECT MAX(ordinal)/2.0 FROM #TEMP)
-
-    SELECT @MEDIAN_SCORE = @MEDIAN_SCORE + score
-      FROM #TEMP
-     WHERE ordinal = (SELECT MAX(ordinal)/2.0 + 1 FROM #TEMP)
-
+    SELECT @MEDIAN_SCORE = score FROM #TEMP WHERE ordinal = (SELECT MAX(ordinal)/2.0 FROM #TEMP)
+    SELECT @MEDIAN_SCORE = @MEDIAN_SCORE + score FROM #TEMP WHERE ordinal = (SELECT MAX(ordinal)/2.0 + 1 FROM #TEMP)
     SELECT @MEDIAN_SCORE = @MEDIAN_SCORE / 2.0
   END
   ELSE
   BEGIN
-    SELECT @MEDIAN_SCORE = score
-      FROM #TEMP
-     WHERE ordinal = CEILING((SELECT MAX(ordinal) FROM #TEMP)/2.0)
+    SELECT @MEDIAN_SCORE = score FROM #TEMP WHERE ordinal = CEILING((SELECT MAX(ordinal) FROM #TEMP)/2.0)
   END
 
-  UPDATE #RESULT
-     SET sector_median = @MEDIAN_SCORE
-    WHERE bdate = @BDATE
+  UPDATE #RESULT SET sector_median = @MEDIAN_SCORE WHERE ordinal = @ORDINAL
 
   SELECT @MEDIAN_SCORE = NULL
   TRUNCATE TABLE #TEMP
-  --SEGMENT
+
   INSERT #TEMP (score)
-  SELECT segment_score
-    FROM #POSITION_SCORES
-   WHERE bdate = @BDATE
-     AND segment_score IS NOT NULL
+  SELECT segment_score FROM #POSITION_SCORES
+   WHERE bdate = @BDATE AND segment_score IS NOT NULL
    ORDER BY segment_score
 
   IF (SELECT MAX(ordinal) FROM #TEMP) % 2 = 0
   BEGIN
-    SELECT @MEDIAN_SCORE = score
-      FROM #TEMP
-     WHERE ordinal = (SELECT MAX(ordinal)/2.0 FROM #TEMP)
-
-    SELECT @MEDIAN_SCORE = @MEDIAN_SCORE + score
-      FROM #TEMP
-     WHERE ordinal = (SELECT MAX(ordinal)/2.0 + 1 FROM #TEMP)
-
+    SELECT @MEDIAN_SCORE = score FROM #TEMP WHERE ordinal = (SELECT MAX(ordinal)/2.0 FROM #TEMP)
+    SELECT @MEDIAN_SCORE = @MEDIAN_SCORE + score FROM #TEMP WHERE ordinal = (SELECT MAX(ordinal)/2.0 + 1 FROM #TEMP)
     SELECT @MEDIAN_SCORE = @MEDIAN_SCORE / 2.0
   END
   ELSE
   BEGIN
-    SELECT @MEDIAN_SCORE = score
-      FROM #TEMP
-     WHERE ordinal = CEILING((SELECT MAX(ordinal) FROM #TEMP)/2.0)
+    SELECT @MEDIAN_SCORE = score FROM #TEMP WHERE ordinal = CEILING((SELECT MAX(ordinal) FROM #TEMP)/2.0)
   END
 
-  UPDATE #RESULT
-     SET segment_median = @MEDIAN_SCORE
-    WHERE bdate = @BDATE
-
-  SELECT @MEDIAN_SCORE = NULL
-  TRUNCATE TABLE #TEMP
+  UPDATE #RESULT SET segment_median = @MEDIAN_SCORE WHERE ordinal = @ORDINAL
 END
 
 DROP TABLE #TEMP
 
 INSERT #RESULT (bdate)
-SELECT bdate
-  FROM #DATE
- WHERE bdate NOT IN (SELECT bdate FROM #RESULT)
-   AND bdate >= (SELECT MIN(bdate) FROM scores WHERE strategy_id = @STRATEGY_ID)
+SELECT DISTINCT bdate
+  FROM #DATE d
+ WHERE NOT EXISTS (SELECT 1 FROM #RESULT r WHERE d.bdate = r.bdate)
+   AND d.bdate >= (SELECT MIN(bdate) FROM scores WHERE strategy_id = @STRATEGY_ID)
 
 IF @DEBUG = 1
 BEGIN
@@ -369,6 +463,12 @@ SELECT bdate			AS [Date],
        total_median		AS [Total Median],
        universe_wgt_avg	AS [Universe Wgt Avg],
        universe_median	AS [Universe Median],
+       region_wgt_avg	AS [Region Wgt Avg],
+       region_median	AS [Region Median],
+       country_wgt_avg	AS [Country Wgt Avg],
+       country_median	AS [Country Median],
+       ss_wgt_avg		AS [SS Wgt Avg],
+       ss_median		AS [SS Median],
        sector_wgt_avg	AS [Sector Wgt Avg],
        sector_median	AS [Sector Median],
        segment_wgt_avg	AS [Segment Wgt Avg],

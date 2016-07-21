@@ -9,10 +9,19 @@ BEGIN
         PRINT '<<< DROPPED PROCEDURE dbo.model_portfolio_populate >>>'
 END
 go
-CREATE PROCEDURE dbo.model_portfolio_populate @BDATE datetime = NULL,
-                                              @STRATEGY_ID int = NULL,
-                                              @DEBUG bit = NULL
+CREATE PROCEDURE dbo.model_portfolio_populate
+@BDATE datetime,
+@STRATEGY_ID int,
+@DEBUG bit = NULL
 AS
+
+DECLARE @MODEL_PORTFOLIO_DEF_CD varchar(32),
+        @RANK_ORDER bit,
+        @TOTAL_MCAP_LONG float,
+        @TOTAL_MCAP_SHORT float,
+        @COUNT_LONG float,
+        @COUNT_SHORT float,
+        @UNIVERSE_ID int
 
 CREATE TABLE #MODEL_PORTFOLIO (
   security_id	int			NULL,
@@ -21,9 +30,6 @@ CREATE TABLE #MODEL_PORTFOLIO (
   eq_weight		float		NULL,
   cap_weight	float		NULL
 )
-
-DECLARE @MODEL_PORTFOLIO_DEF_CD varchar(32),
-        @RANK_ORDER bit
 
 SELECT @MODEL_PORTFOLIO_DEF_CD = d.model_portfolio_def_cd,
        @RANK_ORDER = g.rank_order
@@ -112,11 +118,6 @@ BEGIN
   SELECT * FROM #MODEL_PORTFOLIO
 END
 
-DECLARE @TOTAL_MCAP_LONG float,
-        @TOTAL_MCAP_SHORT float,
-        @COUNT_LONG float,
-        @COUNT_SHORT float
-
 UPDATE #MODEL_PORTFOLIO
    SET mkt_cap = market_cap_usd
   FROM equity_common..market_price p
@@ -163,7 +164,7 @@ END
 IF @COUNT_SHORT != 0.0
 BEGIN
   UPDATE #MODEL_PORTFOLIO
-     SET eq_weight = 1.0 / @COUNT_SHORT
+     SET eq_weight = -1.0 / @COUNT_SHORT
    WHERE ls_flag = 0
 END
 
@@ -172,8 +173,6 @@ BEGIN
   SELECT '#MODEL_PORTFOLIO: AFTER CALCULATING EQ_WEIGHT'
   SELECT * FROM #MODEL_PORTFOLIO
 END
-
-DECLARE @UNIVERSE_ID int
 
 SELECT @UNIVERSE_ID = universe_id
   FROM universe_def

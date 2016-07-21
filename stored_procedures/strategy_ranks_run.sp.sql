@@ -11,7 +11,7 @@ END
 go
 CREATE PROCEDURE dbo.strategy_ranks_run
 @BDATE datetime = NULL, --optional, defaults to previous business day
-@STRATEGY_ID int = NULL, --required
+@STRATEGY_ID int, --required
 @DEBUG bit = NULL
 AS
 
@@ -21,13 +21,15 @@ IF @STRATEGY_ID IS NULL
 IF @BDATE IS NULL
   BEGIN EXEC business_date_get @DIFF=-1, @RET_DATE=@BDATE OUTPUT END
 
-DECLARE @FACTOR_MODEL_ID	int,
-        @FACTOR_ID			int,
-        @UNIVERSE_ID		int,
-        @GROUPS				int,
-        @AGAINST			varchar(1),
-        @AGAINST_CD			varchar(8),
-        @AGAINST_ID			int
+DECLARE
+@FACTOR_MODEL_ID	int,
+@FACTOR_ID			int,
+@UNIVERSE_ID		int,
+@GROUPS				int,
+@AGAINST			varchar(1),
+@AGAINST_CD			varchar(8),
+@AGAINST_ID			int,
+@ORDINAL			int
 
 SELECT @UNIVERSE_ID = universe_id,
        @FACTOR_MODEL_ID = factor_model_id,
@@ -58,7 +60,7 @@ SELECT factor_id, against, against_id
    AND against != 'Y'
 
 INSERT #RANK_PARAMETERS (factor_id, against, against_cd)
-SELECT DISTINCT w.factor_id, w.against, y.issue_country_cd
+SELECT DISTINCT w.factor_id, w.against, ISNULL(y.domicile_iso_cd, y.issue_country_cd)
   FROM factor_against_weight w, universe_makeup p, equity_common..security y
  WHERE w.factor_model_id = @FACTOR_MODEL_ID
    AND w.against = 'Y'
@@ -72,21 +74,23 @@ BEGIN
   SELECT * FROM #RANK_PARAMETERS ORDER BY ordinal
 END
 
-WHILE EXISTS (SELECT * FROM #RANK_PARAMETERS)
+SELECT @ORDINAL = 0
+WHILE EXISTS (SELECT 1 FROM #RANK_PARAMETERS WHERE ordinal > @ORDINAL)
 BEGIN
+  SELECT @ORDINAL = MIN(ordinal) FROM #RANK_PARAMETERS WHERE ordinal > @ORDINAL
+
   SELECT @FACTOR_ID = factor_id,
          @AGAINST = against,
          @AGAINST_CD = against_cd,
          @AGAINST_ID = against_id
     FROM #RANK_PARAMETERS
-   WHERE ordinal = (SELECT MIN(ordinal) FROM #RANK_PARAMETERS)
+   WHERE ordinal = @ORDINAL
 
   EXEC rank_factor_universe @BDATE=@BDATE, @UNIVERSE_ID=@UNIVERSE_ID, @FACTOR_ID=@FACTOR_ID,
   @GROUPS=@GROUPS, @AGAINST=@AGAINST, @AGAINST_CD=@AGAINST_CD, @AGAINST_ID=@AGAINST_ID, @DEBUG=@DEBUG
-
-  DELETE #RANK_PARAMETERS
-   WHERE ordinal = (SELECT MIN(ordinal) FROM #RANK_PARAMETERS)
 END
+
+DROP TABLE #RANK_PARAMETERS
 
 RETURN 0
 go

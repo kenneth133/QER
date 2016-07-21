@@ -10,7 +10,8 @@ BEGIN
 END
 go
 CREATE PROCEDURE dbo.universe_makeup_load
-@SOURCE_CD varchar(8) = 'FS'
+@SOURCE_CD varchar(8) = 'FS',
+@DEBUG bit = NULL
 AS
 
 SELECT @SOURCE_CD = UPPER(@SOURCE_CD)
@@ -20,22 +21,34 @@ IF @SOURCE_CD IS NULL
 IF NOT EXISTS (SELECT * FROM decode WHERE item = 'SOURCE_CD' AND code = @SOURCE_CD)
   BEGIN SELECT 'ERROR: INVALID VALUE PASSED FOR @SOURCE_CD PARAMETER' RETURN -1 END
 
+IF @DEBUG = 1
+BEGIN
+  SELECT 'universe_makeup_staging (1)'
+  SELECT * FROM universe_makeup_staging ORDER BY cusip, sedol, ticker, isin
+END
+
 DELETE universe_makeup_staging
  WHERE cusip IS NULL
    AND ticker IS NULL
    AND sedol IS NULL
    AND isin IS NULL
 
+IF @DEBUG = 1
+BEGIN
+  SELECT 'universe_makeup_staging (2)'
+  SELECT * FROM universe_makeup_staging ORDER BY cusip, sedol, ticker, isin
+END
+
 CREATE TABLE #UNIVERSE_MAKEUP_STAGING (
   universe_dt	datetime	NOT NULL,
   universe_cd	varchar(32)	NOT NULL,
   security_id	int			NULL,
-  ticker		varchar(16)	NULL,
+  ticker		varchar(32)	NULL,
   cusip			varchar(32)	NULL,
   sedol			varchar(32)	NULL,
-  isin			varchar(64)	NULL,
+  isin			varchar(32)	NULL,
   currency_cd	varchar(3)	NULL,
-  exchange_nm	varchar(40)	NULL,
+  exchange_nm	varchar(60)	NULL,
   weight		float		NULL 
 )
 
@@ -43,7 +56,19 @@ INSERT #UNIVERSE_MAKEUP_STAGING
 SELECT universe_dt, universe_cd, NULL, ticker, cusip, sedol, isin, currency_cd, exchange_nm, weight
   FROM universe_makeup_staging
 
+IF @DEBUG = 1
+BEGIN
+  SELECT '#UNIVERSE_MAKEUP_STAGING (1)'
+  SELECT * FROM #UNIVERSE_MAKEUP_STAGING ORDER BY security_id, cusip, sedol, ticker, isin
+END
+
 EXEC security_id_update @TABLE_NAME='#UNIVERSE_MAKEUP_STAGING', @DATE_COL='universe_dt'
+
+IF @DEBUG = 1
+BEGIN
+  SELECT '#UNIVERSE_MAKEUP_STAGING (2)'
+  SELECT * FROM #UNIVERSE_MAKEUP_STAGING ORDER BY security_id, cusip, sedol, ticker, isin
+END
 
 IF EXISTS (SELECT 1 FROM #UNIVERSE_MAKEUP_STAGING WHERE security_id IS NULL)
 BEGIN
@@ -104,6 +129,12 @@ END
 
 EXEC security_id_update @TABLE_NAME='#UNIVERSE_MAKEUP_STAGING', @DATE_COL='universe_dt'
 
+IF @DEBUG = 1
+BEGIN
+  SELECT '#UNIVERSE_MAKEUP_STAGING (3)'
+  SELECT * FROM #UNIVERSE_MAKEUP_STAGING ORDER BY security_id, cusip, sedol, ticker, isin
+END
+
 DELETE universe_makeup
   FROM (SELECT DISTINCT s.universe_dt, d.universe_id
           FROM universe_def d, #UNIVERSE_MAKEUP_STAGING s
@@ -112,7 +143,7 @@ DELETE universe_makeup
    AND universe_makeup.universe_id = x.universe_id
 
 INSERT universe_makeup (universe_dt, universe_id, security_id, weight)
-SELECT s.universe_dt, d.universe_id, s.security_id, s.weight
+SELECT DISTINCT s.universe_dt, d.universe_id, s.security_id, s.weight
   FROM universe_def d, #UNIVERSE_MAKEUP_STAGING s
  WHERE d.universe_cd = s.universe_cd
    AND s.security_id IS NOT NULL

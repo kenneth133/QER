@@ -9,9 +9,10 @@ BEGIN
         PRINT '<<< DROPPED PROCEDURE dbo.universe_gng_populate >>>'
 END
 go
-CREATE PROCEDURE dbo.universe_gng_populate @UNIVERSE_DT datetime = NULL,
-                                           @UNIVERSE_ID int = NULL,
-                                           @DEBUG bit = NULL
+CREATE PROCEDURE dbo.universe_gng_populate
+@UNIVERSE_DT datetime,
+@UNIVERSE_ID int,
+@DEBUG bit = NULL
 AS
 
 IF @UNIVERSE_DT IS NULL
@@ -182,9 +183,9 @@ DROP TABLE #GNG_INPUT_FACTORS
 
 DELETE universe_makeup
  WHERE universe_dt = @UNIVERSE_DT
-   AND universe_id IN (SELECT universe_id FROM universe_def
-                        WHERE universe_cd = @UNIVERSE_CD + 'G'
-                           OR universe_cd = @UNIVERSE_CD + 'NG')
+   AND universe_id IN (SELECT universe_id FROM universe_def WHERE universe_cd = @UNIVERSE_CD + 'G'
+                       UNION
+                       SELECT universe_id FROM universe_def WHERE universe_cd = @UNIVERSE_CD + 'NG')
 
 INSERT universe_makeup
 SELECT @UNIVERSE_DT, d.universe_id, p.security_id, p.weight

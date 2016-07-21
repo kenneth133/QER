@@ -26,21 +26,23 @@ CREATE PROCEDURE dbo.rank_load
 @MISSING_VALUE float = NULL
 AS
 
-IF NOT EXISTS (SELECT * FROM universe_def WHERE universe_cd = @UNIVERSE_CD)
+IF NOT EXISTS (SELECT 1 FROM universe_def WHERE universe_cd = @UNIVERSE_CD)
   BEGIN SELECT 'ERROR: INVALID VALUE PASSED FOR @UNIVERSE_CD PARAMETER' RETURN -1 END
-IF NOT EXISTS (SELECT * FROM factor WHERE factor_cd = @FACTOR_CD)
+IF NOT EXISTS (SELECT 1 FROM factor WHERE factor_cd = @FACTOR_CD)
   BEGIN SELECT 'ERROR: INVALID VALUE PASSED FOR @FACTOR_CD PARAMETER' RETURN -1 END
-IF @FACTOR_SOURCE_CD IS NOT NULL AND NOT EXISTS (SELECT * FROM decode WHERE item = 'SOURCE_CD' AND code = @FACTOR_SOURCE_CD)
+IF @FACTOR_SOURCE_CD IS NOT NULL AND NOT EXISTS (SELECT 1 FROM decode WHERE item = 'SOURCE_CD' AND code = @FACTOR_SOURCE_CD)
   BEGIN SELECT 'ERROR: INVALID VALUE PASSED FOR @FACTOR_SOURCE_CD PARAMETER' RETURN -1 END
-IF @AGAINST NOT IN ('U', 'C', 'G', 'Y')
+IF @AGAINST NOT IN ('U', 'R', 'Y', 'C', 'G')
   BEGIN SELECT 'ERROR: INVALID VALUE PASSED FOR @AGAINST PARAMETER' RETURN -1 END
-IF @AGAINST IN ('C', 'G') AND @AGAINST_ID IS NULL
+IF @AGAINST IN ('C', 'G', 'R') AND @AGAINST_ID IS NULL
   BEGIN SELECT 'ERROR: PARAMETER @AGAINST_ID CANNOT BE NULL' RETURN -1 END
 IF @AGAINST = 'Y' AND @AGAINST_CD IS NULL
   BEGIN SELECT 'ERROR: PARAMETER @AGAINST_CD CANNOT BE NULL' RETURN -1 END
-IF @AGAINST = 'C' AND NOT EXISTS (SELECT * FROM sector_def WHERE sector_id = @AGAINST_ID)
+IF @AGAINST = 'C' AND NOT EXISTS (SELECT 1 FROM sector_def WHERE sector_id = @AGAINST_ID)
   BEGIN SELECT 'ERROR: INVALID VALUE PASSED FOR @AGAINST_ID PARAMETER' RETURN -1 END
-IF @AGAINST = 'G' AND NOT EXISTS (SELECT * FROM segment_def WHERE segment_id = @AGAINST_ID)
+IF @AGAINST = 'G' AND NOT EXISTS (SELECT 1 FROM segment_def WHERE segment_id = @AGAINST_ID)
+  BEGIN SELECT 'ERROR: INVALID VALUE PASSED FOR @AGAINST_ID PARAMETER' RETURN -1 END
+IF @AGAINST = 'R' AND NOT EXISTS (SELECT 1 FROM region_def WHERE region_id = @AGAINST_ID)
   BEGIN SELECT 'ERROR: INVALID VALUE PASSED FOR @AGAINST_ID PARAMETER' RETURN -1 END
 IF @PERIOD_TYPE NOT IN ('YY', 'YYYY', 'QQ', 'Q', 'MM', 'M', 'WK', 'WW', 'DD', 'D')
   BEGIN SELECT 'ERROR: INVALID VALUE PASSED FOR @PERIOD_TYPE PARAMETER' RETURN -1 END
@@ -73,12 +75,12 @@ CREATE TABLE #RANK_STAGING (
   bdate			datetime		NULL,
   universe_dt	datetime		NULL,
   security_id	int				NULL,
-  ticker		varchar(16)		NULL,
+  ticker		varchar(32)		NULL,
   cusip			varchar(32)		NULL,
   sedol			varchar(32)		NULL,
-  isin			varchar(64)		NULL,
+  isin			varchar(32)		NULL,
   currency_cd	varchar(3)		NULL,
-  exchange_nm	varchar(40)		NULL,
+  exchange_nm	varchar(60)		NULL,
   factor_value	float			NULL,
   rank			int				NULL
 )
@@ -121,11 +123,20 @@ BEGIN
        AND g.segment_id = @AGAINST_ID
   END
 
-  SELECT @BDATE = bdate,
+  SELECT TOP 1 @BDATE = bdate,
          @UNIVERSE_DT = universe_dt
     FROM #RANK_STAGING
 
-  EXEC sector_model_security_populate @BDATE=@BDATE, @UNIVERSE_DT=@UNIVERSE_DT, @UNIVERSE_ID=@UNIVERSE_ID, @SECTOR_MODEL_ID=@SECTOR_MODEL_ID
+  IF EXISTS (SELECT 1 FROM universe_makeup p
+              WHERE p.universe_dt = @UNIVERSE_DT
+                AND p.universe_id = @UNIVERSE_ID
+                AND NOT EXISTS (SELECT 1 FROM sector_model_security ss
+                                 WHERE ss.bdate = @BDATE
+                                   AND ss.sector_model_id = @SECTOR_MODEL_ID
+                                   AND ss.security_id = p.security_id))
+  BEGIN
+    EXEC sector_model_security_populate @BDATE=@BDATE, @SECTOR_MODEL_ID=@SECTOR_MODEL_ID, @UNIVERSE_DT=@UNIVERSE_DT, @UNIVERSE_ID=@UNIVERSE_ID
+  END
 END
 
 INSERT rank_inputs
@@ -167,6 +178,16 @@ BEGIN
      AND r.security_id IS NOT NULL
      AND ss.segment_id = @AGAINST_ID
 END
+ELSE IF @AGAINST = 'R'
+BEGIN
+  INSERT rank_output (rank_event_id, security_id, factor_value, rank)
+  SELECT @RANK_EVENT_ID, r.security_id, r.factor_value, r.rank
+    FROM #RANK_STAGING r, equity_common..security y, region_makeup p
+   WHERE r.security_id IS NOT NULL
+     AND r.security_id = y.security_id
+     AND ISNULL(y.domicile_iso_cd, y.issue_country_cd) = p.country_cd
+     AND p.region_id = @AGAINST_ID
+END
 ELSE IF @AGAINST = 'Y'
 BEGIN
   INSERT rank_output (rank_event_id, security_id, factor_value, rank)
@@ -174,7 +195,7 @@ BEGIN
     FROM #RANK_STAGING r, equity_common..security y
    WHERE r.security_id IS NOT NULL
      AND r.security_id = y.security_id
-     AND y.issue_country_cd = @AGAINST_CD
+     AND ISNULL(y.domicile_iso_cd, y.issue_country_cd) = @AGAINST_CD
 END
 
 DROP TABLE #RANK_STAGING

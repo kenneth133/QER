@@ -262,6 +262,7 @@ BEGIN
     security_id	int			NULL,
     sector_id	int			NULL,
     segment_id	int			NULL,
+    region_id	int			NULL,
     country_cd	varchar(8)	NULL
   )
 
@@ -272,6 +273,7 @@ BEGIN
     ss_score		float	NULL,
     universe_score	float	NULL,
     country_score	float	NULL,
+    region_score	float	NULL,
     total_score		float	NULL
   )
 
@@ -293,8 +295,8 @@ BEGIN
       TRUNCATE TABLE #SCORES
 
       INSERT #SCORES
-            (security_id, sector_score, segment_score, ss_score, universe_score, country_score, total_score)
-      SELECT security_id, sector_score, segment_score, ss_score, universe_score, country_score, total_score
+            (security_id, sector_score, segment_score, ss_score, universe_score, country_score, region_score, total_score)
+      SELECT security_id, sector_score, segment_score, ss_score, universe_score, country_score, region_score, total_score
         FROM scores
        WHERE strategy_id = @STRATEGY_ID
          AND bdate = @REBAL_BDATE

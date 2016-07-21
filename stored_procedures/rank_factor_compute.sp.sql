@@ -3,12 +3,9 @@ go
 
 CREATE TABLE #DATA_SET (
   security_id	int		NULL,
-  mkt_cap		float	NULL,
   factor_value	float	NULL,
   ordinal		int identity(1,1) NOT NULL,
-  rank			int		NULL,
-  eq_return		float	NULL,
-  cap_return	float	NULL
+  rank			int		NULL
 )
 
 IF OBJECT_ID('dbo.rank_factor_compute') IS NOT NULL
@@ -48,8 +45,8 @@ SELECT factor_value, AVG(CONVERT(float,ordinal)), MAX(ordinal), MIN(ordinal)
 
 IF @DEBUG = 1
 BEGIN
-  SELECT '#DISTINCT_SET: rank_factor_compute'
-  SELECT * FROM #DISTINCT_SET
+  SELECT '#DISTINCT_SET: rank_factor_compute (1)'
+  SELECT * FROM #DISTINCT_SET ORDER BY factor_value
 END
 
 SELECT @MAX_ORDINAL_P1 = MAX(ordinal) + 1
@@ -65,23 +62,21 @@ UPDATE #DISTINCT_SET
 
 IF @DEBUG = 1
 BEGIN
-  SELECT '#DISTINCT_SET: rank_factor_compute'
-  SELECT * FROM #DISTINCT_SET
+  SELECT '#DISTINCT_SET: rank_factor_compute (2)'
+  SELECT * FROM #DISTINCT_SET ORDER BY factor_value
 END
 
 UPDATE #DATA_SET
    SET rank = CASE WHEN @METHOD = 'MEAN' THEN CONVERT(int,ROUND(ROUND(d.mean,1),0))
                    WHEN @METHOD LIKE 'HI%' THEN CONVERT(int,ROUND(ROUND(d.hi,1),0))
-                   WHEN @METHOD LIKE 'LO%' THEN CONVERT(int,ROUND(ROUND(d.lo,1),0))
-              END
+                   WHEN @METHOD LIKE 'LO%' THEN CONVERT(int,ROUND(ROUND(d.lo,1),0)) END
   FROM #DISTINCT_SET d
- WHERE (#DATA_SET.factor_value = d.factor_value
-    OR (#DATA_SET.factor_value IS NULL AND d.factor_value IS NULL))
+ WHERE ISNULL(#DATA_SET.factor_value,ROUND(-999999999.0000,4)) = ISNULL(d.factor_value,ROUND(-999999999.0000,4))
 
 IF @DEBUG = 1
 BEGIN
   SELECT '#DATA_SET: rank_factor_compute'
-  SELECT * FROM #DATA_SET
+  SELECT * FROM #DATA_SET ORDER BY ordinal, security_id
 END
 
 RETURN 0

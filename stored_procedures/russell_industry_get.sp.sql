@@ -30,40 +30,41 @@ SELECT DISTINCT NULL, y.russell_industry_num, UPPER(y.russell_industry_name)
        SELECT security_id FROM equity_common..position
         WHERE reference_date = @BDATE
           AND reference_date = effective_date
-          AND acct_cd IN (SELECT DISTINCT a.acct_cd
-                            FROM equity_common..account a,
-                                (SELECT account_cd AS [account_cd] FROM account
-                                 UNION
-                                 SELECT benchmark_cd AS [account_cd] FROM benchmark) q
-                           WHERE a.parent = q.account_cd OR a.acct_cd = q.account_cd)) x
+          AND acct_cd IN (SELECT acct_cd AS [account_cd] FROM equity_common..account
+                           WHERE parent IN (SELECT account_cd FROM account)
+                          UNION
+                          SELECT acct_cd AS [account_cd] FROM equity_common..account
+                           WHERE acct_cd IN (SELECT account_cd FROM account)
+                          UNION
+                          SELECT benchmark_cd AS [account_cd] FROM account)) x
  WHERE y.security_id = x.security_id
    AND y.russell_industry_num IS NOT NULL
    AND y.russell_industry_name IS NOT NULL
 
 UPDATE #RUSSELL_INDUSTRY
    SET industry_id = i.industry_id
-  FROM QER..industry_model m, QER..industry i
+  FROM industry_model m, industry i
  WHERE m.industry_model_cd = 'RUSSELL-I'
    AND m.industry_model_id = i.industry_model_id
    AND i.industry_num = #RUSSELL_INDUSTRY.russell_industry_num
 
 DELETE #RUSSELL_INDUSTRY
-  FROM QER..industry i
+  FROM industry i
  WHERE i.industry_id = #RUSSELL_INDUSTRY.industry_id
    AND i.industry_nm IS NOT NULL
 
-UPDATE QER..industry
+UPDATE industry
    SET industry_nm = r.russell_industry_nm
   FROM #RUSSELL_INDUSTRY r
- WHERE QER..industry.industry_id = r.industry_id
-   AND QER..industry.industry_nm IS NULL
+ WHERE industry.industry_id = r.industry_id
+   AND industry.industry_nm IS NULL
 
 DELETE #RUSSELL_INDUSTRY
  WHERE industry_id IS NOT NULL
 
-INSERT QER..industry (industry_model_id, industry_num, industry_nm)
+INSERT industry (industry_model_id, industry_num, industry_nm)
 SELECT m.industry_model_id, r.russell_industry_num, r.russell_industry_nm
-  FROM QER..industry_model m, #RUSSELL_INDUSTRY r
+  FROM industry_model m, #RUSSELL_INDUSTRY r
  WHERE m.industry_model_cd = 'RUSSELL-I'
 
 DROP TABLE #RUSSELL_INDUSTRY

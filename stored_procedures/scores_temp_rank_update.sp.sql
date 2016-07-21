@@ -5,6 +5,7 @@ CREATE TABLE #SECURITY_CLASS (
   security_id	int			NULL,
   sector_id		int			NULL,
   segment_id	int			NULL,
+  region_id		int			NULL,
   country_cd	varchar(8)	NULL
 )
 
@@ -15,6 +16,7 @@ CREATE TABLE #SCORES (
   ss_score			float	NULL,
   universe_score	float	NULL,
   country_score		float	NULL,
+  region_score		float	NULL,
   total_score		float	NULL
 )
 
@@ -36,7 +38,7 @@ AS
 
 SELECT @SCORE_TYPE = UPPER(@SCORE_TYPE)
 
-IF @SCORE_TYPE IS NULL OR (@SCORE_TYPE NOT IN ('SECTOR_SCORE','SEGMENT_SCORE','SS_SCORE','UNIVERSE_SCORE','COUNTRY_SCORE','TOTAL_SCORE'))
+IF @SCORE_TYPE IS NULL OR (@SCORE_TYPE NOT IN ('SECTOR_SCORE','SEGMENT_SCORE','SS_SCORE','UNIVERSE_SCORE','COUNTRY_SCORE','REGION_SCORE','TOTAL_SCORE'))
   BEGIN SELECT 'ERROR: @SCORE_TYPE PARAMETER MUST BE PASSED' RETURN -1 END
 IF @STRATEGY_ID IS NULL
   BEGIN SELECT 'ERROR: @STRATEGY_ID PARAMETER MUST BE PASSED' RETURN -1 END
@@ -78,6 +80,7 @@ SELECT @BDATE, security_id, @FACTOR_ID,
                         WHEN 'SS_SCORE' THEN ss_score
                         WHEN 'UNIVERSE_SCORE' THEN universe_score
                         WHEN 'COUNTRY_SCORE' THEN country_score
+                        WHEN 'REGION_SCORE' THEN region_score
                         WHEN 'TOTAL_SCORE' THEN total_score END,
        @NOW, 'FS'
   FROM #SCORES
@@ -91,7 +94,7 @@ END
 SELECT @RANK_EVENT_ID_MIN = MAX(rank_event_id) + 1
   FROM rank_inputs
 
-IF @SCORE_TYPE IN ('SECTOR_SCORE', 'SEGMENT_SCORE', 'SS_SCORE', 'COUNTRY_SCORE')
+IF @SCORE_TYPE IN ('SECTOR_SCORE', 'SEGMENT_SCORE', 'SS_SCORE', 'COUNTRY_SCORE', 'REGION_SCORE')
 BEGIN
   CREATE TABLE #AGAINST (
     ordinal		int identity(1,1) NOT NULL,
@@ -122,6 +125,14 @@ BEGIN
     INSERT #AGAINST (against_cd)
     SELECT DISTINCT country_cd FROM #SECURITY_CLASS
      WHERE country_cd IS NOT NULL
+  END
+  ELSE IF @SCORE_TYPE = 'REGION_SCORE'
+  BEGIN
+    SELECT @AGAINST = 'R'
+
+    INSERT #AGAINST (against_id)
+    SELECT DISTINCT region_id FROM #SECURITY_CLASS
+     WHERE region_id IS NOT NULL
   END
 
   SELECT @ORDINAL = 0
@@ -157,6 +168,7 @@ UPDATE #SCORES
        ss_score = CASE @SCORE_TYPE WHEN 'SS_SCORE' THEN o.rank ELSE #SCORES.ss_score END,
        universe_score = CASE @SCORE_TYPE WHEN 'UNIVERSE_SCORE' THEN o.rank ELSE #SCORES.universe_score END,
        country_score = CASE @SCORE_TYPE WHEN 'COUNTRY_SCORE' THEN o.rank ELSE #SCORES.country_score END,
+       region_score = CASE @SCORE_TYPE WHEN 'REGION_SCORE' THEN o.rank ELSE #SCORES.country_score END,
        total_score = CASE @SCORE_TYPE WHEN 'TOTAL_SCORE' THEN o.rank ELSE #SCORES.total_score END
   FROM rank_output o
  WHERE o.rank_event_id >= @RANK_EVENT_ID_MIN

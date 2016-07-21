@@ -13,7 +13,7 @@ CREATE PROCEDURE dbo.rpt_model_summary
 @STRATEGY_ID int,
 @BDATE datetime,
 @ACCOUNT_CD varchar(32),
---@REGION_ID int = NULL,
+@REGION_ID int = NULL,
 @COUNTRY_CD varchar(4) = NULL,
 @SECTOR_ID int = NULL,
 @SEGMENT_ID int = NULL,
@@ -35,9 +35,9 @@ CREATE TABLE #RESULT (
   sedol			varchar(32)		NULL,
   isin			varchar(32)		NULL,
   imnt_nm		varchar(100)	NULL,
-/*
+
   region_id		int				NULL,
-  region_nm		varchar(128)	NULL, */
+  region_nm		varchar(128)	NULL,
   country_cd	varchar(50)		NULL,
   country_nm	varchar(128)	NULL,
   sector_id		int				NULL,
@@ -61,7 +61,7 @@ CREATE TABLE #RESULT (
 
   total_score		float		NULL,
   universe_score	float		NULL,
---  region_score		float		NULL,
+  region_score		float		NULL,
   country_score		float		NULL,
   ss_score			float		NULL,
   sector_score		float		NULL,
@@ -70,79 +70,63 @@ CREATE TABLE #RESULT (
   units		float		NULL,
   price		float		NULL,
   mval		float		NULL,
-  
+
   account_wgt		float		NULL,
   benchmark_wgt		float		NULL,
   active_wgt		float		NULL
 )
 
-INSERT #RESULT
-      (security_id, ticker, cusip, sedol, isin, imnt_nm, country_cd,
-       russell_sector_num, russell_industry_num,
-       gics_sector_num, gics_segment_num, gics_industry_num, gics_sub_industry_num,
-       total_score, universe_score, /*region_score,*/ country_score, ss_score, sector_score, segment_score)
-SELECT y.security_id, y.ticker, y.cusip, y.sedol, y.isin, y.security_name, ISNULL(y.domicile_iso_cd, y.issue_country_cd),
-       y.russell_sector_num, y.russell_industry_num,
-       y.gics_sector_num, y.gics_industry_group_num, y.gics_industry_num, y.gics_sub_industry_num,
-       s.total_score, s.universe_score, /*s.region_score,*/ s.country_score, s.ss_score, s.sector_score, s.segment_score
-  FROM scores s, equity_common..security y
- WHERE s.bdate = @BDATE
-   AND s.strategy_id = @STRATEGY_ID
-   AND s.security_id = y.security_id
-
-INSERT #RESULT
-      (security_id, ticker, cusip, sedol, isin, imnt_nm, country_cd,
-       russell_sector_num, russell_industry_num,
-       gics_sector_num, gics_segment_num, gics_industry_num, gics_sub_industry_num)
-SELECT security_id, ticker, cusip, sedol, isin, security_name, ISNULL(domicile_iso_cd, issue_country_cd),
-       russell_sector_num, russell_industry_num,
-       gics_sector_num, gics_industry_group_num, gics_industry_num, gics_sub_industry_num
-  FROM equity_common..security
- WHERE security_id IN (SELECT DISTINCT security_id
-                         FROM equity_common..position
-                        WHERE reference_date = @BDATE
-                          AND reference_date = effective_date
-                          AND acct_cd IN (SELECT DISTINCT acct_cd FROM equity_common..account WHERE parent = @ACCOUNT_CD OR acct_cd = @ACCOUNT_CD)
-                          AND security_id IS NOT NULL
-                          AND security_id NOT IN (SELECT security_id FROM #RESULT WHERE security_id IS NOT NULL))
+INSERT #RESULT (security_id, units, price, account_wgt, benchmark_wgt)
+SELECT security_id, 0.0, 0.0, 0.0, 0.0
+  FROM universe_makeup
+ WHERE universe_dt = @BDATE
+   AND universe_id = (SELECT universe_id FROM strategy WHERE strategy_id = @STRATEGY_ID)
+   AND security_id IS NOT NULL
+UNION
+SELECT security_id, 0.0, 0.0, 0.0, 0.0
+  FROM equity_common..position
+ WHERE reference_date = @BDATE
+   AND reference_date = effective_date
+   AND acct_cd IN (SELECT acct_cd FROM equity_common..account WHERE parent = @ACCOUNT_CD
+                   UNION
+                   SELECT acct_cd FROM equity_common..account WHERE acct_cd = @ACCOUNT_CD)
+   AND security_id IS NOT NULL
 
 IF @DEBUG = 1
 BEGIN
-  SELECT '#RESULT: AFTER INITIAL INSERTS'
-  SELECT * FROM #RESULT ORDER BY cusip, isin
+  SELECT '#RESULT (1)'
+  SELECT * FROM #RESULT ORDER BY cusip, sedol, ticker, isin
 END
 
-DECLARE @SECTOR_MODEL_ID int,
-        @DUMMY_UNIVERSE_ID int
+UPDATE #RESULT
+   SET ticker = y.ticker,
+       cusip = y.cusip,
+       sedol = y.sedol,
+       isin = y.isin,
+       imnt_nm = y.security_name,
+       country_cd = ISNULL(y.domicile_iso_cd, y.issue_country_cd),
+       russell_sector_num = y.russell_sector_num,
+       russell_industry_num = y.russell_industry_num,
+       gics_sector_num = y.gics_sector_num,
+       gics_segment_num = y.gics_industry_group_num,
+       gics_industry_num = y.gics_industry_num,
+       gics_sub_industry_num = y.gics_sub_industry_num
+  FROM equity_common..security y
+ WHERE #RESULT.security_id = y.security_id
 
-SELECT @SECTOR_MODEL_ID = m.sector_model_id
-  FROM strategy g, factor_model m
+UPDATE #RESULT
+   SET country_nm = UPPER(c.country_name)
+  FROM equity_common..country c
+ WHERE #RESULT.country_cd = c.country_cd
+
+UPDATE #RESULT
+   SET region_id = d.region_id,
+       region_nm = d.region_nm
+  FROM strategy g, region_def d, region_makeup p
  WHERE g.strategy_id = @STRATEGY_ID
-   AND g.factor_model_id = m.factor_model_id
-
-SELECT @DUMMY_UNIVERSE_ID = universe_id FROM universe_def WHERE universe_cd = 'DUMMY'
-
-INSERT universe_makeup (universe_dt, universe_id, security_id)
-SELECT @BDATE, @DUMMY_UNIVERSE_ID, r.security_id
-  FROM #RESULT r
- WHERE NOT EXISTS (SELECT 1 FROM sector_model_security ss
-                    WHERE ss.bdate = @BDATE
-                      AND ss.sector_model_id = @SECTOR_MODEL_ID
-                      AND ss.security_id = r.security_id)
-   AND r.security_id IS NOT NULL
-
-IF @DEBUG = 1
-BEGIN
-  SELECT 'DUMMY UNIVERSE TO BE CLASSIFIED'
-  SELECT * FROM universe_makeup
-   WHERE universe_id = @DUMMY_UNIVERSE_ID
-   ORDER BY universe_dt, security_id
-END
-
-EXEC sector_model_security_populate @BDATE=@BDATE, @SECTOR_MODEL_ID=@SECTOR_MODEL_ID, @UNIVERSE_DT=@BDATE, @UNIVERSE_ID=@DUMMY_UNIVERSE_ID
-
-DELETE universe_makeup
- WHERE universe_id = @DUMMY_UNIVERSE_ID
+   AND g.region_model_id = d.region_model_id
+   AND d.region_id = p.region_id
+   AND #RESULT.country_cd = p.country_cd
 
 UPDATE #RESULT
    SET sector_id = ss.sector_id,
@@ -165,70 +149,67 @@ UPDATE #RESULT
  WHERE #RESULT.segment_id = d.segment_id
 
 UPDATE #RESULT
-   SET price = p.price_close_usd
-  FROM equity_common..market_price p
- WHERE #RESULT.security_id = p.security_id
-   AND p.reference_date = @BDATE
+   SET russell_sector_nm = d.sector_nm
+  FROM sector_model m, sector_def d
+ WHERE m.sector_model_cd = 'RUSSELL-S'
+   AND m.sector_model_id = d.sector_model_id
+   AND d.sector_num = #RESULT.russell_sector_num
 
 UPDATE #RESULT
-   SET country_nm = UPPER(c.country_name)
-  FROM equity_common..country c
- WHERE #RESULT.country_cd = c.country_cd
-/*
+   SET russell_industry_nm = i.industry_nm
+  FROM industry_model m, industry i
+ WHERE m.industry_model_cd = 'RUSSELL-I'
+   AND m.industry_model_id = i.industry_model_id
+   AND i.industry_num = #RESULT.russell_industry_num
+
 UPDATE #RESULT
-   SET region_id = d.region_id,
-       region_nm = d.region_nm
-  FROM strategy g, region_def d, region_makeup p
- WHERE g.strategy_id = @STRATEGY_ID
-   AND g.region_model_id = d.region_model_id
-   AND d.region_id = p.region_id
-   AND #RESULT.country_cd = p.country_cd
-*/
-BEGIN--UPDATE SECTOR INFO
-  UPDATE #RESULT
-     SET russell_sector_nm = d.sector_nm
-    FROM sector_model m, sector_def d
-   WHERE m.sector_model_cd = 'RUSSELL-S'
-     AND m.sector_model_id = d.sector_model_id
-     AND d.sector_num = #RESULT.russell_sector_num
+   SET gics_sector_nm = d.sector_nm
+  FROM sector_model m, sector_def d
+ WHERE m.sector_model_cd = 'GICS-S'
+   AND m.sector_model_id = d.sector_model_id
+   AND d.sector_num = #RESULT.gics_sector_num
 
-  UPDATE #RESULT
-     SET russell_industry_nm = i.industry_nm
-    FROM industry_model m, industry i
-   WHERE m.industry_model_cd = 'RUSSELL-I'
-     AND m.industry_model_id = i.industry_model_id
-     AND i.industry_num = #RESULT.russell_industry_num
+UPDATE #RESULT 
+   SET gics_segment_nm = g.segment_nm
+  FROM sector_model m, sector_def c, segment_def g
+ WHERE m.sector_model_cd = 'GICS-S'
+   AND m.sector_model_id = c.sector_model_id
+   AND c.sector_id = g.sector_id
+   AND g.segment_num = #RESULT.gics_segment_num
 
-  UPDATE #RESULT
-     SET gics_sector_nm = d.sector_nm
-    FROM sector_model m, sector_def d
-   WHERE m.sector_model_cd = 'GICS-S'
-     AND m.sector_model_id = d.sector_model_id
-     AND d.sector_num = #RESULT.gics_sector_num
+UPDATE #RESULT
+   SET gics_industry_nm = i.industry_nm
+  FROM industry_model m, industry i
+ WHERE m.industry_model_cd = 'GICS-I'
+   AND m.industry_model_id = i.industry_model_id
+   AND i.industry_num = #RESULT.gics_industry_num
 
-  UPDATE #RESULT 
-     SET gics_segment_nm = g.segment_nm
-    FROM sector_model m, sector_def c, segment_def g
-   WHERE m.sector_model_cd = 'GICS-S'
-     AND m.sector_model_id = c.sector_model_id
-     AND c.sector_id = g.sector_id
-     AND g.segment_num = #RESULT.gics_segment_num
+UPDATE #RESULT
+   SET gics_sub_industry_nm = b.sub_industry_nm
+  FROM industry_model m, industry i, sub_industry b
+ WHERE m.industry_model_cd = 'GICS-I'
+   AND m.industry_model_id = i.industry_model_id
+   AND i.industry_id = b.industry_id
+   AND b.sub_industry_num = #RESULT.gics_sub_industry_num
 
-  UPDATE #RESULT
-     SET gics_industry_nm = i.industry_nm
-    FROM industry_model m, industry i
-   WHERE m.industry_model_cd = 'GICS-I'
-     AND m.industry_model_id = i.industry_model_id
-     AND i.industry_num = #RESULT.gics_industry_num
+UPDATE #RESULT
+   SET total_score = s.total_score,
+       universe_score = s.universe_score,
+       region_score = s.region_score,
+       country_score = s.country_score,
+       ss_score = s.ss_score,
+       sector_score = s.sector_score,
+       segment_score = s.segment_score
+  FROM scores s
+ WHERE s.bdate = @BDATE
+   AND s.strategy_id = @STRATEGY_ID
+   AND #RESULT.security_id = s.security_id
 
-  UPDATE #RESULT
-     SET gics_sub_industry_nm = b.sub_industry_nm
-    FROM industry_model m, industry i, sub_industry b
-   WHERE m.industry_model_cd = 'GICS-I'
-     AND m.industry_model_id = i.industry_model_id
-     AND i.industry_id = b.industry_id
-     AND b.sub_industry_num = #RESULT.gics_sub_industry_num
-END--UPDATE SECTOR INFO
+IF @DEBUG = 1
+BEGIN
+  SELECT '#RESULT (2)'
+  SELECT * FROM #RESULT ORDER BY cusip, sedol, ticker, isin
+END
 
 UPDATE #RESULT
    SET units = x.quantity
@@ -236,35 +217,26 @@ UPDATE #RESULT
           FROM equity_common..position
          WHERE reference_date = @BDATE
            AND reference_date = effective_date
-           AND acct_cd IN (SELECT DISTINCT acct_cd FROM equity_common..account WHERE parent = @ACCOUNT_CD OR acct_cd = @ACCOUNT_CD)
+           AND acct_cd IN (SELECT acct_cd FROM equity_common..account WHERE parent = @ACCOUNT_CD
+                           UNION
+                           SELECT acct_cd FROM equity_common..account WHERE acct_cd = @ACCOUNT_CD)
          GROUP BY security_id) x
  WHERE #RESULT.security_id = x.security_id
 
-IF @DEBUG = 1
-BEGIN
-  SELECT '#RESULT: AFTER INITIAL UPDATES'
-  SELECT * FROM #RESULT ORDER BY cusip, isin
-END
-
 UPDATE #RESULT
-   SET units = 0.0
- WHERE units IS NULL
+   SET price = ISNULL(p.price_close_usd,0.0)
+  FROM equity_common..market_price p
+ WHERE #RESULT.security_id = p.security_id
+   AND p.reference_date = @BDATE
 
 UPDATE #RESULT
    SET mval = units * price
 
 DECLARE @ACCOUNT_MVAL float
-
-SELECT @ACCOUNT_MVAL = SUM(mval)
-  FROM #RESULT
+SELECT @ACCOUNT_MVAL = SUM(mval) FROM #RESULT
 
 IF @ACCOUNT_MVAL != 0.0
-BEGIN
-  UPDATE #RESULT
-     SET account_wgt = mval / @ACCOUNT_MVAL
-END
-ELSE
-  BEGIN UPDATE #RESULT SET account_wgt = 0.0 END
+  BEGIN UPDATE #RESULT SET account_wgt = mval / @ACCOUNT_MVAL END
 
 IF EXISTS (SELECT 1 FROM account a, benchmark b
             WHERE a.strategy_id = @STRATEGY_ID
@@ -295,16 +267,12 @@ BEGIN
 END
 
 UPDATE #RESULT
-   SET benchmark_wgt = 0.0
- WHERE benchmark_wgt IS NULL
-
-UPDATE #RESULT
    SET active_wgt = account_wgt - benchmark_wgt
 
 IF @DEBUG = 1
 BEGIN
-  SELECT '#RESULT: FINAL STATE'
-  SELECT * FROM #RESULT ORDER BY cusip, isin
+  SELECT '#RESULT (3)'
+  SELECT * FROM #RESULT ORDER BY cusip, sedol, ticker, isin
 END
 
 DECLARE @SQL varchar(1500)
@@ -313,7 +281,7 @@ SELECT @SQL = @SQL + 'cusip AS [CUSIP], '
 SELECT @SQL = @SQL + 'sedol AS [SEDOL], '
 SELECT @SQL = @SQL + 'isin AS [ISIN], '
 SELECT @SQL = @SQL + 'imnt_nm AS [Name], '
---SELECT @SQL = @SQL + 'region_nm AS [Region Name], '
+SELECT @SQL = @SQL + 'region_nm AS [Region Name], '
 SELECT @SQL = @SQL + 'country_nm AS [Country Name], '
 SELECT @SQL = @SQL + 'sector_nm AS [Sector Name], '
 SELECT @SQL = @SQL + 'segment_nm AS [Segment Name], '
@@ -325,7 +293,7 @@ SELECT @SQL = @SQL + 'gics_industry_nm AS [GICS Industry Name], '
 SELECT @SQL = @SQL + 'gics_sub_industry_nm AS [GICS Sub-Industry Name], '
 SELECT @SQL = @SQL + 'ROUND(total_score,1) AS [Total], '
 SELECT @SQL = @SQL + 'ROUND(universe_score,1) AS [Universe], '
---SELECT @SQL = @SQL + 'ROUND(region_score,1) AS [Region], '
+SELECT @SQL = @SQL + 'ROUND(region_score,1) AS [Region], '
 SELECT @SQL = @SQL + 'ROUND(country_score,1) AS [Country], '
 SELECT @SQL = @SQL + 'ROUND(ss_score,1) AS [SS], '
 SELECT @SQL = @SQL + 'ROUND(sector_score,1) AS [Sector], '
@@ -334,9 +302,8 @@ SELECT @SQL = @SQL + 'account_wgt AS [Account], '
 SELECT @SQL = @SQL + 'benchmark_wgt AS [Benchmark], '
 SELECT @SQL = @SQL + 'active_wgt AS [Active] '
 SELECT @SQL = @SQL + 'FROM #RESULT WHERE 1=1 '
-/*
 IF @REGION_ID IS NOT NULL
-  BEGIN SELECT @SQL = @SQL + 'AND region_id = ' + CONVERT(varchar,@REGION_ID) + ' ' END */
+  BEGIN SELECT @SQL = @SQL + 'AND region_id = ' + CONVERT(varchar,@REGION_ID) + ' ' END
 IF @COUNTRY_CD IS NOT NULL
   BEGIN SELECT @SQL = @SQL + 'AND country_cd = ''' + @COUNTRY_CD + ''' ' END
 IF @SECTOR_ID IS NOT NULL
@@ -346,9 +313,9 @@ IF @SEGMENT_ID IS NOT NULL
 IF EXISTS (SELECT * FROM decode WHERE item='MODEL SUMMARY - EXCLUDE NULL SECTOR' AND code=@STRATEGY_ID)
   BEGIN SELECT @SQL = @SQL + 'AND sector_id IS NOT NULL ' END
 IF EXISTS (SELECT * FROM strategy WHERE strategy_id = @STRATEGY_ID AND rank_order = 1)
-  BEGIN SELECT @SQL = @SQL + 'ORDER BY total_score DESC, universe_score DESC, ss_score DESC, country_score DESC, ticker, cusip, isin' END
+  BEGIN SELECT @SQL = @SQL + 'ORDER BY total_score DESC, universe_score DESC, ss_score DESC, sector_score DESC, segment_score DESC, region_score DESC, country_score DESC, cusip, sedol, ticker, isin' END
 ELSE
-  BEGIN SELECT @SQL = @SQL + 'ORDER BY ISNULL(total_score,9999), ISNULL(universe_score,9999), ISNULL(ss_score,9999), ISNULL(country_score,9999), ticker, cusip, isin' END
+  BEGIN SELECT @SQL = @SQL + 'ORDER BY ISNULL(total_score,9999), ISNULL(universe_score,9999), ISNULL(ss_score,9999), ISNULL(sector_score,9999), ISNULL(segment_score,9999), ISNULL(region_score,9999), ISNULL(country_score,9999), cusip, sedol, ticker, isin' END
 
 IF @DEBUG = 1
   BEGIN SELECT '@SQL', @SQL END

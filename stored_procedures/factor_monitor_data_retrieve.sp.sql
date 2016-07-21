@@ -33,10 +33,10 @@ IF @DEBUG = 1
 
 CREATE TABLE #RESULT (
   security_id	int			NOT NULL,
-  ticker		varchar(16)	NULL,
+  ticker		varchar(32)	NULL,
   cusip			varchar(32)	NULL,
   sedol			varchar(32)	NULL,
-  isin			varchar(64)	NULL,
+  isin			varchar(32)	NULL,
   mkt_cap		float		NULL
 )
 
@@ -54,7 +54,7 @@ SELECT y.security_id, y.ticker, y.cusip, y.sedol, y.isin, NULL
                                  SELECT benchmark_cd AS [account_cd] FROM benchmark) q
                            WHERE a.parent = q.account_cd OR a.acct_cd = q.account_cd)) x
  WHERE y.security_id = x.security_id
-   AND y.issue_country_cd = 'USA'
+   AND ISNULL(y.domicile_iso_cd, y.issue_country_cd) = 'USA'
 
 UPDATE #RESULT
    SET mkt_cap = p.market_cap_usd

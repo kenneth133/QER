@@ -14,11 +14,12 @@ AS
 
 /*
 NOTE:
-FOR DEBUGGING PURPOSES, DO NOT DELETE DUMMY DATA FROM rank_inputs and rank_output
+FOR DEBUGGING PURPOSES, DO NOT DELETE DUMMY DATA FROM rank_inputs AND rank_output TABLES
 */
 
 DELETE instrument_factor
- WHERE factor_id IN (SELECT factor_id FROM factor WHERE factor_cd = 'DUMMY')
+ WHERE bdate = bdate
+   AND factor_id IN (SELECT factor_id FROM factor WHERE factor_cd = 'DUMMY')
 
 RETURN 0
 go

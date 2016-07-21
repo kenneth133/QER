@@ -21,7 +21,7 @@ IF NOT EXISTS (SELECT * FROM decode WHERE item = 'SOURCE_CD' AND code = @SOURCE_
   BEGIN SELECT 'ERROR: INVALID VALUE PASSED FOR @SOURCE_CD PARAMETER' RETURN -1 END
 
 DECLARE @NOW datetime
-SELECT @NOW = getdate()
+SELECT @NOW = GETDATE()
 
 DELETE instrument_factor_staging
  WHERE cusip IS NULL
@@ -32,12 +32,12 @@ DELETE instrument_factor_staging
 CREATE TABLE #INSTRUMENT_FACTOR_STAGING (
   bdate			datetime	NULL,
   security_id	int			NULL,
-  ticker		varchar(16)	NULL,
+  ticker		varchar(32)	NULL,
   cusip			varchar(32) NULL,
   sedol			varchar(32) NULL,
-  isin			varchar(64)	NULL,
+  isin			varchar(32)	NULL,
   currency_cd	varchar(3)	NULL,
-  exchange_nm	varchar(40)	NULL,
+  exchange_nm	varchar(60)	NULL,
   factor_id		int			NULL,
   factor_value	float		NULL
 )
@@ -115,8 +115,7 @@ DELETE #INSTRUMENT_FACTOR_STAGING
  WHERE #INSTRUMENT_FACTOR_STAGING.bdate = i.bdate
    AND #INSTRUMENT_FACTOR_STAGING.factor_id = i.factor_id
    AND #INSTRUMENT_FACTOR_STAGING.security_id = i.security_id
-   AND (#INSTRUMENT_FACTOR_STAGING.factor_value = i.factor_value
-    OR (#INSTRUMENT_FACTOR_STAGING.factor_value IS NULL AND i.factor_value IS NULL))
+   AND ISNULL(#INSTRUMENT_FACTOR_STAGING.factor_value,ROUND(-999999999.0000,4)) = ISNULL(i.factor_value,ROUND(-999999999.0000,4))
    AND i.source_cd = @SOURCE_CD
 
 INSERT instrument_factor

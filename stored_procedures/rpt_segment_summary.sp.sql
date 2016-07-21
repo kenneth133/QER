@@ -9,12 +9,13 @@ BEGIN
         PRINT '<<< DROPPED PROCEDURE dbo.rpt_segment_summary >>>'
 END
 go
-CREATE PROCEDURE dbo.rpt_segment_summary @STRATEGY_ID int,
-                                         @BDATE datetime,
-                                         @ACCOUNT_CD varchar(32),
-                                         @WEIGHT varchar(16),
-                                         @SEGMENT_BY varchar(32),
-                                         @DEBUG bit = NULL
+CREATE PROCEDURE dbo.rpt_segment_summary
+@STRATEGY_ID int,
+@BDATE datetime,
+@ACCOUNT_CD varchar(32),
+@WEIGHT varchar(16),
+@SEGMENT_BY varchar(32),
+@DEBUG bit = NULL
 AS
 /* PORTFOLIO - BY SEGMENT */
 
@@ -30,27 +31,22 @@ IF @WEIGHT NOT IN ('EQUAL', 'CAP')
   BEGIN SELECT 'ERROR: INVALID VALUE PASSED FOR @WEIGHT PARAMETER' RETURN -1 END
 IF @SEGMENT_BY IS NULL
   BEGIN SELECT 'ERROR: @SEGMENT_BY IS A REQUIRED PARAMETER' RETURN -1 END
-IF @SEGMENT_BY NOT IN ('SECTOR','SEGMENT','COUNTRY')
+IF @SEGMENT_BY NOT IN ('SECTOR','SEGMENT','REGION','COUNTRY')
   BEGIN SELECT 'ERROR: INVALID VALUE PASSED FOR @SEGMENT_BY PARAMETER' RETURN -1 END
 
-DECLARE @SECTOR_MODEL_ID int,
-        @BENCHMARK_CD varchar(50),
-        @MODEL_ID int
-
-SELECT @SECTOR_MODEL_ID = m.sector_model_id
-  FROM strategy g, factor_model m
- WHERE g.strategy_id = @STRATEGY_ID
-   AND g.factor_model_id = m.factor_model_id
+DECLARE
+@BENCHMARK_CD varchar(50),
+@MODEL_ID int,
+@COUNT int
 
 SELECT @BENCHMARK_CD = benchmark_cd
   FROM account
  WHERE strategy_id = @STRATEGY_ID
    AND account_cd = @ACCOUNT_CD
 
-EXEC sector_model_security_populate @BDATE=@BDATE, @UNIVERSE_DT=@BDATE, @UNIVERSE_CD=@BENCHMARK_CD, @SECTOR_MODEL_ID=@SECTOR_MODEL_ID, @DEBUG=@DEBUG
-
 CREATE TABLE #RESULT (
   security_id	int			NULL,
+  region_id		int			NULL,
   country_cd	varchar(4)	NULL,
   sector_id		int			NULL,
   segment_id	int			NULL,
@@ -71,31 +67,6 @@ BEGIN
    WHERE g.strategy_id = @STRATEGY_ID
      AND g.universe_id = d1.universe_id
      AND d2.universe_cd = d1.universe_cd + '_MPF_EQL'
-
-  IF EXISTS (SELECT 1 FROM account a, benchmark b
-              WHERE a.strategy_id = @STRATEGY_ID
-                AND a.account_cd = @ACCOUNT_CD
-                AND a.benchmark_cd = b.benchmark_cd)
-  BEGIN
-    INSERT #RESULT (security_id)
-    SELECT security_id
-      FROM equity_common..benchmark_weight
-     WHERE reference_date = @BDATE
-       AND reference_date = effective_date
-       AND acct_cd = @BENCHMARK_CD
-  END
-  ELSE
-  BEGIN
-    INSERT #RESULT (security_id)
-    SELECT p.security_id
-      FROM universe_def d, universe_makeup p
-     WHERE d.universe_cd = @BENCHMARK_CD
-       AND d.universe_id = p.universe_id
-       AND p.universe_dt = @BDATE
-  END
-
-  UPDATE #RESULT
-     SET benchmark_wgt = 1.0 / (SELECT COUNT(*) FROM #RESULT)
 END
 ELSE IF @WEIGHT = 'CAP'
 BEGIN
@@ -104,70 +75,102 @@ BEGIN
    WHERE g.strategy_id = @STRATEGY_ID
      AND g.universe_id = d1.universe_id
      AND d2.universe_cd = d1.universe_cd + '_MPF_CAP'
+END
 
-  IF EXISTS (SELECT 1 FROM account a, benchmark b
-              WHERE a.strategy_id = @STRATEGY_ID
-                AND a.account_cd = @ACCOUNT_CD
-                AND a.benchmark_cd = b.benchmark_cd)
+IF EXISTS (SELECT 1 FROM benchmark WHERE benchmark_cd = @BENCHMARK_CD)
+BEGIN
+  INSERT #RESULT (security_id, units, price, account_wgt, benchmark_wgt, model_wgt)
+  SELECT security_id, 0.0, 0.0, 0.0, 0.0, 0.0
+    FROM equity_common..position
+   WHERE reference_date = @BDATE
+     AND reference_date = effective_date
+     AND acct_cd IN (SELECT acct_cd FROM equity_common..account WHERE parent = @ACCOUNT_CD
+                     UNION
+                     SELECT acct_cd FROM equity_common..account WHERE acct_cd = @ACCOUNT_CD)
+     AND security_id IS NOT NULL
+  UNION
+  SELECT security_id, 0.0, 0.0, 0.0, 0.0, 0.0
+    FROM equity_common..benchmark_weight
+   WHERE reference_date = @BDATE
+     AND reference_date = effective_date
+     AND acct_cd = @BENCHMARK_CD
+     AND security_id IS NOT NULL
+  UNION
+  SELECT security_id, 0.0, 0.0, 0.0, 0.0, 0.0
+    FROM universe_makeup
+   WHERE universe_dt = @BDATE
+     AND universe_id = @MODEL_ID
+     AND security_id IS NOT NULL
+
+  IF @WEIGHT = 'EQUAL'
   BEGIN
-    INSERT #RESULT (security_id, benchmark_wgt)
-    SELECT security_id, weight
+    SELECT @COUNT = COUNT(*)
       FROM equity_common..benchmark_weight
      WHERE reference_date = @BDATE
        AND reference_date = effective_date
        AND acct_cd = @BENCHMARK_CD
+       AND security_id IS NOT NULL
   END
-  ELSE
+
+  UPDATE #RESULT
+     SET benchmark_wgt = CASE WHEN @WEIGHT='EQUAL' THEN 1.0/@COUNT
+                              WHEN @WEIGHT='CAP' THEN w.weight END
+    FROM equity_common..benchmark_weight w
+   WHERE w.reference_date = @BDATE
+     AND w.reference_date = w.effective_date
+     AND w.acct_cd = @BENCHMARK_CD
+     AND #RESULT.security_id = w.security_id
+END
+ELSE
+BEGIN
+  INSERT #RESULT (security_id, units, price, account_wgt, benchmark_wgt, model_wgt)
+  SELECT security_id, 0.0, 0.0, 0.0, 0.0, 0.0
+    FROM equity_common..position
+   WHERE reference_date = @BDATE
+     AND reference_date = effective_date
+     AND acct_cd IN (SELECT acct_cd FROM equity_common..account WHERE parent = @ACCOUNT_CD
+                     UNION
+                     SELECT acct_cd FROM equity_common..account WHERE acct_cd = @ACCOUNT_CD)
+     AND security_id IS NOT NULL
+  UNION
+  SELECT security_id, 0.0, 0.0, 0.0, 0.0, 0.0
+    FROM universe_def d, universe_makeup p
+   WHERE d.universe_cd = @BENCHMARK_CD
+     AND p.universe_dt = @BDATE
+     AND p.universe_id = d.universe_id
+     AND security_id IS NOT NULL
+  UNION
+  SELECT security_id, 0.0, 0.0, 0.0, 0.0, 0.0
+    FROM universe_makeup
+   WHERE universe_dt = @BDATE
+     AND universe_id = @MODEL_ID
+     AND security_id IS NOT NULL
+
+  IF @WEIGHT = 'EQUAL'
   BEGIN
-    INSERT #RESULT (security_id, benchmark_wgt)
-    SELECT p.security_id, p.weight / 100.0
+    SELECT @COUNT = COUNT(*)
       FROM universe_def d, universe_makeup p
      WHERE d.universe_cd = @BENCHMARK_CD
-       AND d.universe_id = p.universe_id
        AND p.universe_dt = @BDATE
+       AND p.universe_id = d.universe_id
+       AND security_id IS NOT NULL
   END
+
+  UPDATE #RESULT
+     SET benchmark_wgt = CASE WHEN @WEIGHT='EQUAL' THEN 1.0/@COUNT
+                              WHEN @WEIGHT='CAP' THEN p.weight/100.0 END
+    FROM universe_def d, universe_makeup p
+   WHERE d.universe_cd = @BENCHMARK_CD
+     AND p.universe_dt = @BDATE
+     AND p.universe_id = d.universe_id
+     AND #RESULT.security_id = p.security_id
 END
-
-INSERT #RESULT (security_id)
-SELECT security_id
-  FROM universe_makeup
- WHERE universe_dt = @BDATE
-   AND universe_id = @MODEL_ID
-   AND security_id IS NOT NULL
-   AND security_id NOT IN (SELECT security_id FROM #RESULT WHERE security_id IS NOT NULL)
-
-INSERT #RESULT (security_id)
-SELECT DISTINCT security_id
-  FROM equity_common..position
- WHERE reference_date = @BDATE
-   AND reference_date = effective_date
-   AND acct_cd IN (SELECT DISTINCT acct_cd FROM equity_common..account WHERE parent = @ACCOUNT_CD OR acct_cd = @ACCOUNT_CD)
-   AND security_id IS NOT NULL
-   AND security_id NOT IN (SELECT security_id FROM #RESULT WHERE security_id IS NOT NULL)
 
 IF @DEBUG = 1
 BEGIN
-  SELECT '#RESULT: AFTER INITIAL INSERTS'
+  SELECT '#RESULT (1)'
   SELECT * FROM #RESULT ORDER BY security_id
 END
-
-UPDATE #RESULT
-   SET benchmark_wgt = 0.0
- WHERE benchmark_wgt IS NULL
-
-UPDATE #RESULT
-   SET model_wgt = p.weight / 100.0
-  FROM universe_makeup p
- WHERE p.universe_dt = @BDATE
-   AND p.universe_id = @MODEL_ID
-   and #RESULT.security_id = p.security_id
-
-UPDATE #RESULT
-   SET model_wgt = 0.0
- WHERE model_wgt IS NULL
-
-IF EXISTS (SELECT * FROM decode WHERE item='MODEL WEIGHT NULL' AND code=@STRATEGY_ID)
-  BEGIN UPDATE #RESULT SET model_wgt = NULL END
 
 UPDATE #RESULT
    SET units = x.quantity
@@ -175,17 +178,14 @@ UPDATE #RESULT
           FROM equity_common..position
          WHERE reference_date = @BDATE
            AND reference_date = effective_date
-           AND acct_cd IN (SELECT DISTINCT acct_cd FROM equity_common..account WHERE parent = @ACCOUNT_CD OR acct_cd = @ACCOUNT_CD)
+           AND acct_cd IN (SELECT acct_cd FROM equity_common..account WHERE parent = @ACCOUNT_CD
+                           UNION
+                           SELECT acct_cd FROM equity_common..account WHERE acct_cd = @ACCOUNT_CD)
          GROUP BY security_id) x
  WHERE #RESULT.security_id = x.security_id
 
 UPDATE #RESULT
-   SET country_cd = y.issue_country_cd
-  FROM equity_common..security y
- WHERE #RESULT.security_id = y.security_id
-
-UPDATE #RESULT
-   SET price = p.price_close_usd
+   SET price = ISNULL(p.price_close_usd,0.0)
   FROM equity_common..market_price p
  WHERE #RESULT.security_id = p.security_id
    AND p.reference_date = @BDATE
@@ -194,29 +194,30 @@ UPDATE #RESULT
    SET mval = units * price
 
 DECLARE @ACCOUNT_MVAL float
-
-SELECT @ACCOUNT_MVAL = SUM(mval)
-  FROM #RESULT
+SELECT @ACCOUNT_MVAL = SUM(mval) FROM #RESULT
 
 IF @ACCOUNT_MVAL != 0.0
-BEGIN
-  UPDATE #RESULT
-     SET account_wgt = mval / @ACCOUNT_MVAL
-END
-ELSE
-  BEGIN UPDATE #RESULT SET account_wgt = 0.0 END
+  BEGIN UPDATE #RESULT SET account_wgt = mval / @ACCOUNT_MVAL END
 
 UPDATE #RESULT
-   SET account_wgt = 0.0
- WHERE account_wgt IS NULL
+   SET model_wgt = p.weight / 100.0
+  FROM universe_makeup p
+ WHERE p.universe_dt = @BDATE
+   AND p.universe_id = @MODEL_ID
+   AND #RESULT.security_id = p.security_id
+
+IF EXISTS (SELECT * FROM decode WHERE item='MODEL WEIGHT NULL' AND code=@STRATEGY_ID)
+  BEGIN UPDATE #RESULT SET model_wgt = NULL END
 
 IF @DEBUG = 1
 BEGIN
-  SELECT '#RESULT: AFTER UPDATES'
+  SELECT '#RESULT (2)'
   SELECT * FROM #RESULT ORDER BY security_id
 END
 
 CREATE TABLE #RESULT2 (
+  region_id			int				NULL,
+  region_nm			varchar(128)	NULL,
   country_cd		varchar(4)		NULL,
   country_nm		varchar(128)	NULL,
   sector_id			int				NULL,
@@ -235,36 +236,25 @@ CREATE TABLE #RESULT2 (
 
 IF @SEGMENT_BY IN ('SECTOR','SEGMENT')
 BEGIN
-  DECLARE @DUMMY_UNIVERSE_ID int
-  SELECT @DUMMY_UNIVERSE_ID = universe_id FROM universe_def WHERE universe_cd = 'DUMMY'
-
-  INSERT universe_makeup (universe_dt, universe_id, security_id)
-  SELECT @BDATE, @DUMMY_UNIVERSE_ID, r.security_id
-    FROM #RESULT r
-   WHERE NOT EXISTS (SELECT 1 FROM sector_model_security ss
-                      WHERE ss.bdate = @BDATE
-                        AND ss.sector_model_id = @SECTOR_MODEL_ID
-                        AND ss.security_id = r.security_id)
-
-  IF @DEBUG = 1
+  IF EXISTS (SELECT 1 FROM #RESULT r
+              WHERE NOT EXISTS (SELECT 1 FROM strategy g, factor_model m, sector_model_security ss
+                                 WHERE g.strategy_id = @STRATEGY_ID
+                                   AND g.factor_model_id = m.factor_model_id
+                                   AND ss.bdate = @BDATE
+                                   AND ss.sector_model_id = m.sector_model_id
+                                   AND ss.security_id = r.security_id))
   BEGIN
-    SELECT 'DUMMY UNIVERSE TO BE CLASSIFIED'
-    SELECT * FROM universe_makeup
-     WHERE universe_id = @DUMMY_UNIVERSE_ID
-     ORDER BY universe_dt, security_id
+    EXEC strategy_security_classify @BDATE=@BDATE, @STRATEGY_ID=@STRATEGY_ID, @DEBUG=@DEBUG
   END
-
-  EXEC sector_model_security_populate @BDATE=@BDATE, @SECTOR_MODEL_ID=@SECTOR_MODEL_ID, @UNIVERSE_DT=@BDATE, @UNIVERSE_ID=@DUMMY_UNIVERSE_ID
-
-  DELETE universe_makeup
-   WHERE universe_id = @DUMMY_UNIVERSE_ID
 
   UPDATE #RESULT
      SET sector_id = ss.sector_id,
          segment_id = ss.segment_id
-    FROM sector_model_security ss
-   WHERE ss.bdate = @BDATE
-     AND ss.sector_model_id = @SECTOR_MODEL_ID
+    FROM sector_model_security ss, strategy g, factor_model f
+   WHERE g.strategy_id = @STRATEGY_ID
+     AND g.factor_model_id = f.factor_model_id
+     AND ss.bdate = @BDATE
+     AND ss.sector_model_id = f.sector_model_id
      AND #RESULT.security_id = ss.security_id
 
   UPDATE #RESULT
@@ -272,33 +262,19 @@ BEGIN
          segment_id = -1
    WHERE security_id IN (SELECT security_id FROM equity_common..security WHERE cusip = '_USD')
 
-  UPDATE #RESULT
-     SET sector_id = -2
-   WHERE sector_id IS NULL
-
-  UPDATE #RESULT
-     SET segment_id = -2
-   WHERE segment_id IS NULL
-
-  IF @DEBUG = 1
-  BEGIN
-    SELECT '#RESULT: AFTER SECTOR AND SEGMENT UPDATES'
-    SELECT * FROM #RESULT ORDER BY sector_id, segment_id
-  END
+  UPDATE #RESULT SET sector_id = -2 WHERE sector_id IS NULL
+  UPDATE #RESULT SET segment_id = -2 WHERE segment_id IS NULL
 
   IF @SEGMENT_BY = 'SECTOR'
   BEGIN
-    INSERT #RESULT2
-          (sector_id, account_wgt, benchmark_wgt, model_wgt)
+    INSERT #RESULT2 (sector_id, account_wgt, benchmark_wgt, model_wgt)
     SELECT sector_id, SUM(account_wgt), SUM(benchmark_wgt), SUM(model_wgt)
       FROM #RESULT
      GROUP BY sector_id
   END
-
-  IF @SEGMENT_BY = 'SEGMENT'
+  ELSE IF @SEGMENT_BY = 'SEGMENT'
   BEGIN
-    INSERT #RESULT2
-          (sector_id, segment_id, account_wgt, benchmark_wgt, model_wgt)
+    INSERT #RESULT2 (sector_id, segment_id, account_wgt, benchmark_wgt, model_wgt)
     SELECT sector_id, segment_id, SUM(account_wgt), SUM(benchmark_wgt), SUM(model_wgt)
       FROM #RESULT
      GROUP BY sector_id, segment_id
@@ -306,7 +282,7 @@ BEGIN
 
   IF @DEBUG = 1
   BEGIN
-    SELECT '#RESULT2: AFTER INITIAL INSERT'
+    SELECT '#RESULT2 (1)'
     SELECT * FROM #RESULT2 ORDER BY sector_id, segment_id
   END
 
@@ -328,25 +304,16 @@ BEGIN
    WHERE #RESULT2.segment_id = d.segment_id
 
   UPDATE #RESULT2
-     SET sector_num = 9999,
-         sector_nm = 'CASH',
-         segment_num = 9999,
-         segment_nm = 'CASH'
+     SET sector_num = 9999, sector_nm = 'CASH',
+         segment_num = 9999, segment_nm = 'CASH'
    WHERE sector_id = -1
 
-  UPDATE #RESULT2
-     SET sector_num = 9998,
-         sector_nm = 'UNKNOWN'
-   WHERE sector_id = -2
-
-  UPDATE #RESULT2
-     SET segment_num = 9998,
-         segment_nm = 'UNKNOWN'
-   WHERE segment_id = -2
+  UPDATE #RESULT2 SET sector_num = 9998, sector_nm = 'UNKNOWN' WHERE sector_id = -2
+  UPDATE #RESULT2 SET segment_num = 9998, segment_nm = 'UNKNOWN' WHERE segment_id = -2
 
   IF @DEBUG = 1
   BEGIN
-    SELECT '#RESULT2: AFTER UPDATES'
+    SELECT '#RESULT2 (2)'
     SELECT * FROM #RESULT2 ORDER BY sector_id, segment_id
   END
 
@@ -362,8 +329,7 @@ BEGIN
       FROM #RESULT2
      ORDER BY sector_num
   END
-
-  IF @SEGMENT_BY = 'SEGMENT'
+  ELSE IF @SEGMENT_BY = 'SEGMENT'
   BEGIN
     SELECT sector_nm		AS [Sector Name],
            segment_nm		AS [Segment Name],
@@ -377,19 +343,48 @@ BEGIN
      ORDER BY sector_num, segment_num
   END
 END
-
-IF @SEGMENT_BY IN ('COUNTRY')
+ELSE IF @SEGMENT_BY IN ('REGION','COUNTRY')
 BEGIN
-  INSERT #RESULT2
-        (country_cd, account_wgt, benchmark_wgt, model_wgt)
-  SELECT country_cd, SUM(account_wgt), SUM(benchmark_wgt), SUM(model_wgt)
-    FROM #RESULT
-   GROUP BY country_cd
+  UPDATE #RESULT
+     SET country_cd = ISNULL(y.domicile_iso_cd, y.issue_country_cd)
+    FROM equity_common..security y
+   WHERE #RESULT.security_id = y.security_id
+
+  UPDATE #RESULT
+     SET region_id = d.region_id
+    FROM strategy g, region_def d, region_makeup p
+   WHERE g.strategy_id = @STRATEGY_ID
+     AND g.region_model_id = d.region_model_id
+     AND d.region_id = p.region_id
+     AND #RESULT.country_cd = p.country_cd
+
+  UPDATE #RESULT
+     SET region_id = -1
+   WHERE region_id IS NULL
+
+  UPDATE #RESULT
+     SET country_cd = 'XXXX'
+   WHERE country_cd IS NULL
+
+  IF @SEGMENT_BY = 'REGION'
+  BEGIN
+    INSERT #RESULT2 (region_id, account_wgt, benchmark_wgt, model_wgt)
+    SELECT region_id, SUM(account_wgt), SUM(benchmark_wgt), SUM(model_wgt)
+      FROM #RESULT
+     GROUP BY region_id
+  END
+  ELSE IF @SEGMENT_BY = 'COUNTRY'
+  BEGIN
+    INSERT #RESULT2 (region_id, country_cd, account_wgt, benchmark_wgt, model_wgt)
+    SELECT region_id, country_cd, SUM(account_wgt), SUM(benchmark_wgt), SUM(model_wgt)
+      FROM #RESULT
+     GROUP BY region_id, country_cd
+  END
 
   IF @DEBUG = 1
   BEGIN
-    SELECT '#RESULT2: AFTER INITIAL INSERT'
-    SELECT * FROM #RESULT2 ORDER BY country_cd
+    SELECT '#RESULT2 (1)'
+    SELECT * FROM #RESULT2 ORDER BY region_id, country_cd
   END
 
   UPDATE #RESULT2
@@ -403,24 +398,44 @@ BEGIN
    WHERE #RESULT2.country_cd = c.country_cd
 
   UPDATE #RESULT2
-     SET country_nm = 'UNKNOWN'
-   WHERE country_nm IS NULL
+     SET region_nm = d.region_nm
+    FROM region_def d
+   WHERE #RESULT2.region_id = d.region_id
+
+  UPDATE #RESULT2 SET country_nm = 'UNKNOWN' WHERE country_cd = 'XXXX'
+  UPDATE #RESULT2 SET region_nm = 'UNKNOWN' WHERE region_id = -1
 
   IF @DEBUG = 1
   BEGIN
-    SELECT '#RESULT2: AFTER UPDATES'
-    SELECT * FROM #RESULT2 ORDER BY country_cd
+    SELECT '#RESULT2 (2)'
+    SELECT * FROM #RESULT2 ORDER BY region_id, country_cd
   END
 
-  SELECT country_nm		AS [Country Name],
-         account_wgt	AS [Account],
-         benchmark_wgt	AS [Benchmark],
-         model_wgt		AS [Model],
-         acct_bmk_wgt	AS [Acct-Bmk],
-         model_bmk_wgt	AS [Model-Bmk],
-         acct_model_wgt	AS [Acct-Model]
-    FROM #RESULT2
-   ORDER BY country_nm
+  IF @SEGMENT_BY = 'REGION'
+  BEGIN
+    SELECT region_nm		AS [Region Name],
+           account_wgt		AS [Account],
+           benchmark_wgt	AS [Benchmark],
+           model_wgt		AS [Model],
+           acct_bmk_wgt		AS [Acct-Bmk],
+           model_bmk_wgt	AS [Model-Bmk],
+           acct_model_wgt	AS [Acct-Model]
+      FROM #RESULT2
+     ORDER BY region_nm
+  END
+  ELSE IF @SEGMENT_BY = 'COUNTRY'
+  BEGIN
+    SELECT region_nm		AS [Region Name],
+           country_nm		AS [Country Name],
+           account_wgt		AS [Account],
+           benchmark_wgt	AS [Benchmark],
+           model_wgt		AS [Model],
+           acct_bmk_wgt		AS [Acct-Bmk],
+           model_bmk_wgt	AS [Model-Bmk],
+           acct_model_wgt	AS [Acct-Model]
+      FROM #RESULT2
+     ORDER BY region_nm, country_nm
+  END
 END
 
 DROP TABLE #RESULT2

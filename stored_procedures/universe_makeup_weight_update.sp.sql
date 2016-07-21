@@ -9,10 +9,11 @@ BEGIN
         PRINT '<<< DROPPED PROCEDURE dbo.universe_makeup_weight_update >>>'
 END
 go
-CREATE PROCEDURE dbo.universe_makeup_weight_update @UNIVERSE_DT datetime,
-                                                   @UNIVERSE_CD varchar(32) = NULL,
-                                                   @UNIVERSE_ID int = NULL,
-                                                   @WEIGHT varchar(32) = 'CAP'
+CREATE PROCEDURE dbo.universe_makeup_weight_update
+@UNIVERSE_DT datetime,
+@UNIVERSE_CD varchar(32) = NULL,
+@UNIVERSE_ID int = NULL,
+@WEIGHT varchar(32) = 'CAP'
 AS
 
 IF @UNIVERSE_DT IS NULL
@@ -40,23 +41,16 @@ CREATE TABLE #UNIV (
 IF @WEIGHT = 'CAP'
 BEGIN
   INSERT #UNIV
-  SELECT p.security_id, p.market_cap_usd, NULL
+  SELECT p.security_id, ISNULL(p.market_cap_usd,0.0), 0.0
     FROM universe_makeup u, equity_common..market_price p
    WHERE u.universe_dt = @UNIVERSE_DT
      AND u.universe_id = @UNIVERSE_ID
      AND u.universe_dt = p.reference_date
      AND u.security_id = p.security_id
 
-  UPDATE #UNIV
-     SET mkt_cap = 0.0
-   WHERE mkt_cap IS NULL
+  SELECT @MKT_CAP_SUM = SUM(mkt_cap) FROM #UNIV
 
-  SELECT @MKT_CAP_SUM = SUM(mkt_cap)
-    FROM #UNIV
-
-  IF @MKT_CAP_SUM = 0
-    BEGIN UPDATE #UNIV SET weight = 0.0 END
-  ELSE
+  IF @MKT_CAP_SUM != 0.0
     BEGIN UPDATE #UNIV SET weight = mkt_cap / @MKT_CAP_SUM END
 
   UPDATE universe_makeup

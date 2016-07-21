@@ -9,11 +9,12 @@ BEGIN
         PRINT '<<< DROPPED PROCEDURE dbo.rpt_strategy_view_current >>>'
 END
 go
-CREATE PROCEDURE dbo.rpt_strategy_view_current @BDATE datetime,
-                                               @MODEL_TYPE varchar(16),
-                                               @IDENTIFIER_TYPE varchar(32),
-                                               @IDENTIFIER_VALUE varchar(64),
-                                               @DEBUG bit = NULL
+CREATE PROCEDURE dbo.rpt_strategy_view_current
+@BDATE datetime,
+@MODEL_TYPE varchar(16),
+@IDENTIFIER_TYPE varchar(32),
+@IDENTIFIER_VALUE varchar(64),
+@DEBUG bit = NULL
 AS
 /* STOCK - BY STRATEGY */
 
@@ -38,14 +39,14 @@ ELSE IF @MODEL_TYPE = 'CAP'
 CREATE TABLE #SECURITY (
   bdate			datetime		NULL,
   security_id	int				NULL,
-  ticker		varchar(16)		NULL,
+  ticker		varchar(32)		NULL,
   cusip			varchar(32)		NULL,
   sedol			varchar(32)		NULL,
-  isin			varchar(64)		NULL,
-  imnt_nm		varchar(255)	NULL,
+  isin			varchar(32)		NULL,
+  imnt_nm		varchar(100)	NULL,
   currency_cd	varchar(3)		NULL,
-  exchange_nm	varchar(40)		NULL,
-  country_cd	varchar(4)		NULL,
+  exchange_nm	varchar(60)		NULL,
+  country_cd	varchar(50)		NULL,
   country_nm	varchar(128)	NULL
 )
 
@@ -64,31 +65,19 @@ END
 ELSE IF @IDENTIFIER_TYPE = 'ISIN'
   BEGIN INSERT #SECURITY (bdate, isin) VALUES (@BDATE, @IDENTIFIER_VALUE) END
 
-DECLARE @SQL varchar(1000)
-
-SELECT @SQL = 'UPDATE #SECURITY '
-SELECT @SQL = @SQL + 'SET security_id = y.security_id '
-SELECT @SQL = @SQL + 'FROM equity_common..security y '
-SELECT @SQL = @SQL + 'WHERE #SECURITY.'+@IDENTIFIER_TYPE+' = y.'+@IDENTIFIER_TYPE+' '
-SELECT @SQL = @SQL + 'AND y.local_ccy_cd = ''USD'''
-
-IF @DEBUG=1 BEGIN SELECT '@SQL', @SQL END
-EXEC(@SQL)
+EXEC security_id_update @TABLE_NAME='#SECURITY'
 
 IF @DEBUG = 1
 BEGIN
   SELECT '#SECURITY (1)'
-  SELECT * FROM #SECURITY ORDER BY cusip, sedol
+  SELECT * FROM #SECURITY
 END
 
-IF EXISTS (SELECT 1 FROM #SECURITY WHERE security_id IS NULL)
-  BEGIN EXEC security_id_update @TABLE_NAME='#SECURITY' END
+IF NOT EXISTS (SELECT 1 FROM #SECURITY WHERE security_id IS NOT NULL)
+  BEGIN RETURN 0 END
 
-IF @DEBUG = 1
-BEGIN
-  SELECT '#SECURITY (2)'
-  SELECT * FROM #SECURITY ORDER BY cusip, sedol
-END
+DECLARE @SECURITY_ID int
+SELECT @SECURITY_ID = security_id FROM #SECURITY
 
 UPDATE #SECURITY
    SET ticker = y.ticker,
@@ -96,28 +85,60 @@ UPDATE #SECURITY
        sedol = y.sedol,
        isin = y.isin,
        imnt_nm = y.security_name,
-       country_cd = y.issue_country_cd
+       country_cd = ISNULL(y.domicile_iso_cd, y.issue_country_cd)
   FROM equity_common..security y
- WHERE #SECURITY.security_id = y.security_id
+ WHERE y.security_id = @SECURITY_ID
 
 UPDATE #SECURITY
    SET country_nm = UPPER(c.country_name)
   FROM equity_common..country c
  WHERE #SECURITY.country_cd = c.country_cd
 
-IF @DEBUG = 1  
-BEGIN  
-  SELECT '#SECURITY (3)'
-  SELECT * FROM #SECURITY ORDER BY cusip, sedol
-END  
-  
-SELECT ticker	AS [Ticker],  
-       cusip	AS [CUSIP],  
-       sedol	AS [SEDOL],  
-       isin		AS [ISIN],  
-       imnt_nm	AS [Name],  
+IF @DEBUG = 1
+BEGIN
+  SELECT '#SECURITY (2)'
+  SELECT * FROM #SECURITY
+END
+
+SELECT ticker	AS [Ticker],
+       cusip	AS [CUSIP],
+       sedol	AS [SEDOL],
+       isin		AS [ISIN],
+       imnt_nm	AS [Name],
        country_nm AS [Country Name]
-  FROM #SECURITY 
+  FROM #SECURITY
+
+DROP TABLE #SECURITY
+
+CREATE TABLE #STRATEGY_ID ( strategy_id int NOT NULL )
+EXEC access_strategy_get
+
+IF @DEBUG = 1
+BEGIN
+  SELECT '#STRATEGY_ID'
+  SELECT * FROM #STRATEGY_ID
+END
+
+CREATE TABLE #SCORE (
+  strategy_id	int		NULL,
+  total_score	float	NULL
+)
+
+INSERT #SCORE
+SELECT strategy_id, total_score
+  FROM scores
+ WHERE bdate = @BDATE
+   AND strategy_id IN (SELECT strategy_id FROM #STRATEGY_ID)
+   AND security_id = @SECURITY_ID
+   AND total_score IS NOT NULL
+
+IF @DEBUG = 1
+BEGIN
+  SELECT '#SCORE'
+  SELECT * FROM #SCORE
+END
+
+DROP TABLE #STRATEGY_ID
 
 CREATE TABLE #POSITION (
   account_cd	varchar(50) NULL,
@@ -128,46 +149,33 @@ CREATE TABLE #POSITION (
   weight		float		NULL
 )
 
-INSERT #POSITION (account_cd, security_id, units)
-SELECT p.acct_cd, p.security_id, SUM(ISNULL(p.quantity,0.0))
+INSERT #POSITION (account_cd, security_id, units, price, weight)
+SELECT p.acct_cd, p.security_id, SUM(ISNULL(p.quantity,0.0)), 0.0, 0.0
   FROM equity_common..position p
  WHERE p.reference_date = @BDATE
    AND p.reference_date = p.effective_date
    AND p.acct_cd IN (SELECT DISTINCT n.acct_cd
-                       FROM equity_common..position n, #SECURITY s
+                       FROM equity_common..position n
                       WHERE n.reference_date = @BDATE
                         AND n.reference_date = n.effective_date
-                        AND n.acct_cd IN (SELECT DISTINCT e.acct_cd
-                                            FROM equity_common..account e, account q
-                                           WHERE (e.parent = q.account_cd OR e.acct_cd = q.account_cd)
-                                             AND q.representative = 1)
-                        AND n.security_id = s.security_id)
+                        AND n.acct_cd IN (SELECT a1.acct_cd FROM equity_common..account a1, account b1
+                                           WHERE b1.strategy_id IN (SELECT strategy_id FROM #SCORE)
+                                             AND a1.parent = b1.account_cd AND b1.representative = 1
+                                          UNION
+                                          SELECT a2.acct_cd FROM equity_common..account a2, account b2
+                                           WHERE b2.strategy_id IN (SELECT strategy_id FROM #SCORE)
+                                             AND a2.acct_cd = b2.account_cd AND b2.representative = 1)
+                        AND n.security_id = @SECURITY_ID)
  GROUP BY p.acct_cd, p.security_id
 
-DELETE #POSITION WHERE units = 0.0
-
 UPDATE #POSITION
-   SET price = p.price_close_usd
+   SET price = ISNULL(p.price_close_usd,0.0)
   FROM equity_common..market_price p
- WHERE #POSITION.security_id = p.security_id
-   AND p.reference_date = @BDATE
+ WHERE p.reference_date = @BDATE
+   AND #POSITION.security_id = p.security_id
 
 UPDATE #POSITION
    SET mval = units * price
-
-INSERT #POSITION (account_cd, security_id, mval)
-SELECT e.parent, p.security_id, SUM(mval)
-  FROM #POSITION p, equity_common..account e, account q
- WHERE q.representative = 1
-   AND q.account_cd = e.parent
-   AND p.account_cd = e.acct_cd
-   AND e.parent NOT IN (SELECT DISTINCT account_cd FROM #POSITION)
- GROUP BY e.parent, p.security_id
-
-UPDATE #POSITION  
-   SET weight = mval / x.total_mval  
-  FROM (SELECT account_cd, SUM(mval) AS total_mval FROM #POSITION GROUP BY account_cd) x  
- WHERE #POSITION.account_cd = x.account_cd  
 
 IF @DEBUG = 1
 BEGIN
@@ -175,32 +183,11 @@ BEGIN
   SELECT * FROM #POSITION ORDER BY account_cd, security_id
 END
 
-DELETE #POSITION
-  FROM #SECURITY s
- WHERE #POSITION.security_id != s.security_id
-
-DELETE #POSITION
- WHERE account_cd NOT IN (SELECT DISTINCT account_cd FROM account
-                           WHERE representative = 1)
-
-IF @DEBUG = 1
-BEGIN
-  SELECT '#POSITION (1.5)'
-  SELECT * FROM #POSITION ORDER BY account_cd, security_id
-END
-
-CREATE TABLE #STRATEGY_ID ( strategy_id int NOT NULL )
-EXEC access_strategy_get
-
-INSERT #POSITION (account_cd, security_id, weight)
-SELECT DISTINCT a.account_cd, y.security_id, 0.0
-  FROM #SECURITY y, scores s, account a
- WHERE s.bdate = @BDATE
-   AND s.security_id = y.security_id
-   AND s.strategy_id = a.strategy_id
-   AND a.strategy_id IN (SELECT strategy_id FROM #STRATEGY_ID)
-   AND a.representative = 1
-   AND a.account_cd NOT IN (SELECT account_cd FROM #POSITION)
+UPDATE #POSITION
+   SET weight = mval / x.total_mval
+  FROM (SELECT account_cd, SUM(mval) AS total_mval FROM #POSITION GROUP BY account_cd) x
+ WHERE #POSITION.account_cd = x.account_cd
+   AND x.total_mval != 0.0
 
 IF @DEBUG = 1
 BEGIN
@@ -215,7 +202,6 @@ CREATE TABLE #RESULT (
   model_cd			varchar(32)	NULL,
 
   account_cd		varchar(32)	NULL,
-  representative	bit			NULL,
   benchmark_cd		varchar(32)	NULL,
   total_score		float		NULL,
 
@@ -228,74 +214,60 @@ CREATE TABLE #RESULT (
   acct_mpf_wgt		float		NULL
 )
 
-INSERT #RESULT
-      (strategy_id, strategy_cd, account_cd, representative, benchmark_cd, account_wgt)
-SELECT g.strategy_id, g.strategy_cd, a.account_cd, a.representative, a.benchmark_cd, p.weight
-  FROM #POSITION p, account a, strategy g
- WHERE p.account_cd = a.account_cd
-   AND a.strategy_id = g.strategy_id
-   AND a.strategy_id IN (SELECT strategy_id FROM #STRATEGY_ID)
+INSERT #RESULT (strategy_id, account_cd, benchmark_cd, total_score, account_wgt, benchmark_wgt, model_wgt)
+SELECT s.strategy_id, a.account_cd, a.benchmark_cd, s.total_score, 0.0, 0.0, 0.0
+  FROM #SCORE s, account a
+ WHERE s.strategy_id = a.strategy_id
+   AND a.representative = 1
 
-DROP TABLE #STRATEGY_ID
+IF @DEBUG = 1
+BEGIN
+  SELECT '#RESULT (1)'
+  SELECT * FROM #RESULT ORDER BY strategy_cd, account_cd, benchmark_cd
+END
+
+UPDATE #RESULT
+   SET account_wgt = p.weight
+  FROM #POSITION p
+ WHERE #RESULT.account_cd = p.account_cd
+   AND p.security_id = @SECURITY_ID
+
+DROP TABLE #POSITION
+DROP TABLE #SCORE
 
 UPDATE #RESULT
    SET benchmark_wgt = w.weight
-  FROM #POSITION p, equity_common..benchmark_weight w
- WHERE #RESULT.account_cd = p.account_cd
+  FROM equity_common..benchmark_weight w
+ WHERE #RESULT.benchmark_cd IN (SELECT benchmark_cd FROM benchmark)
    AND #RESULT.benchmark_cd = w.acct_cd
    AND w.reference_date = @BDATE
    AND w.reference_date = w.effective_date
-   AND p.security_id = w.security_id
+   AND w.security_id = @SECURITY_ID
 
 UPDATE #RESULT
    SET benchmark_wgt = m.weight / 100.0
-  FROM #POSITION p, universe_def d, universe_makeup m
- WHERE #RESULT.account_cd = p.account_cd
-   AND #RESULT.benchmark_cd = d.universe_cd
+  FROM universe_def d, universe_makeup m
+ WHERE #RESULT.benchmark_cd = d.universe_cd
    AND d.universe_id = m.universe_id
    AND m.universe_dt = @BDATE
-   AND p.security_id = m.security_id
+   AND m.security_id = @SECURITY_ID
    AND #RESULT.benchmark_wgt IS NULL
 
-  UPDATE #RESULT
-     SET total_score = c.total_score
-    FROM scores c, #SECURITY s
-   WHERE c.bdate = @BDATE
-     AND #RESULT.strategy_id = c.strategy_id
-     AND s.security_id = c.security_id
+UPDATE #RESULT
+   SET strategy_cd = g.strategy_cd,
+       model_id = d2.universe_id,
+       model_cd = d2.universe_cd
+  FROM strategy g, universe_def d1, universe_def d2
+ WHERE #RESULT.strategy_id = g.strategy_id
+   AND g.universe_id = d1.universe_id
+   AND d2.universe_cd = d1.universe_cd + @MODEL_TYPE
 
-  UPDATE #RESULT
-     SET model_id = d2.universe_id,
-         model_cd = d2.universe_cd
-    FROM strategy g, universe_def d1, universe_def d2
-   WHERE #RESULT.strategy_id = g.strategy_id
-     AND g.universe_id = d1.universe_id
-     AND d2.universe_cd = d1.universe_cd + @MODEL_TYPE
-
-  UPDATE #RESULT
-     SET model_wgt = m.weight / 100.0
-    FROM #POSITION p, universe_makeup m
-   WHERE #RESULT.account_cd = p.account_cd
-     AND #RESULT.model_id = m.universe_id
-     AND m.universe_dt = @BDATE
-     AND m.security_id = p.security_id
-
-IF @DEBUG = 1  
-BEGIN  
-  SELECT '#RESULT (1)'  
-  SELECT * FROM #RESULT ORDER BY strategy_cd, account_cd, benchmark_cd  
-END  
-
-DELETE #RESULT  
- WHERE total_score IS NULL  
-  
-UPDATE #RESULT  
-   SET benchmark_wgt = 0.0  
- WHERE benchmark_wgt IS NULL  
-  
-UPDATE #RESULT  
-   SET model_wgt = 0.0  
- WHERE model_wgt IS NULL  
+UPDATE #RESULT
+   SET model_wgt = m.weight / 100.0
+  FROM universe_makeup m
+ WHERE #RESULT.model_id = m.universe_id
+   AND m.universe_dt = @BDATE
+   AND m.security_id = @SECURITY_ID
 
 UPDATE #RESULT
    SET model_wgt = NULL
@@ -303,17 +275,17 @@ UPDATE #RESULT
  WHERE d.item = 'MODEL WEIGHT NULL'
    AND #RESULT.strategy_id = d.code
 
-UPDATE #RESULT  
-   SET acct_bm_wgt = account_wgt - benchmark_wgt,  
-       mpf_bm_wgt = model_wgt - benchmark_wgt,  
-       acct_mpf_wgt = account_wgt - model_wgt  
-  
-IF @DEBUG = 1  
-BEGIN  
-  SELECT '#RESULT (2)'  
-  SELECT * FROM #RESULT ORDER BY strategy_cd, account_cd, benchmark_cd  
-END  
-  
+UPDATE #RESULT
+   SET acct_bm_wgt = account_wgt - benchmark_wgt,
+       mpf_bm_wgt = model_wgt - benchmark_wgt,
+       acct_mpf_wgt = account_wgt - model_wgt
+
+IF @DEBUG = 1
+BEGIN
+  SELECT '#RESULT (2)'
+  SELECT * FROM #RESULT ORDER BY strategy_cd, account_cd, benchmark_cd
+END
+
 SELECT strategy_cd		AS [Strategy],
        account_cd		AS [Portfolio],
        benchmark_cd		AS [Benchmark],
@@ -325,8 +297,10 @@ SELECT strategy_cd		AS [Strategy],
        mpf_bm_wgt		AS [Model-Bmk Wgt],
        acct_mpf_wgt		AS [Acct-Model Wgt]
   FROM #RESULT
- ORDER BY strategy_cd, benchmark_cd, representative DESC, account_cd
-  
+ ORDER BY strategy_cd, benchmark_cd, account_cd
+
+DROP TABLE #RESULT
+
 RETURN 0
 go
 IF OBJECT_ID('dbo.rpt_strategy_view_current') IS NOT NULL
