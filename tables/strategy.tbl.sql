@@ -10,6 +10,7 @@ create table dbo.strategy (
   factor_model_id		int		not null,
   fractile			int		not null,
   rank_order			bit		not null,
-  model_portfolio_def_id	int		null
+  model_portfolio_def_id	int		null,
+  region_model_id		int		null
 )
 go

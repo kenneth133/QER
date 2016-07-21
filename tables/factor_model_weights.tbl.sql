@@ -9,7 +9,8 @@ create table dbo.factor_model_weights (
   segment_ss_wgt	float		null,
   ss_total_wgt		float		null,
   universe_total_wgt	float		null,
-  country_total_wgt	float		null
+  country_total_wgt	float		null,
+  region_total_wgt	float		null
 )
 go
 

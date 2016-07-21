@@ -10,6 +10,7 @@ create table dbo.scores (
   ss_score			float		null,
   universe_score	float		null,
   country_score		float		null,
+  region_score		float		null,
   total_score		float		null
 )
 

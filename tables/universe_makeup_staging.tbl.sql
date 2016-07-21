@@ -10,12 +10,12 @@ create table dbo.universe_makeup_staging (
   universe_cd	varchar(32)	not null,
 
   mqa_id		varchar(32)	null,
-  ticker		varchar(16)	null,
+  ticker		varchar(32)	null,
   cusip			varchar(32)	null,
   sedol			varchar(32)	null,
-  isin			varchar(64)	null,
+  isin			varchar(32)	null,
   currency_cd	varchar(3)	null,
-  exchange_nm	varchar(40)	null,
+  exchange_nm	varchar(60)	null,
 
   weight		float		null
 )
