@@ -1,2 +1,49 @@
-# QER
-Quant Equity Research Database
+## QER - Quant Equity Research Database
+#### Kenneth Lee
+#### August 1, 2016
+
+<br> This was the database I built from 2005 to 2008. I was the sole architect and lead developer on the project. The database was built in Microsoft SQL Server 2005 and subsequently upgraded to SQL Server 2008. My responsibilities included:
+
+-   database design / database architecture
+-   all database objects (tables, stored procedures, indexes, etc)
+-   all processes that load data into the database
+-   all queries that returned data for reporting
+-   query and process optimization / performance tuning
+-   data scrubbing / data cleanliness / data integrity
+
+I worked very closely with the Quantitative Equity Research Team to develop the database. It was the central technology component necessary for running financial models for pure Quantitative strategies as well as for models which supported Fundamental strategies. Here are some highlights of the system capabilities:
+
+-   Load from any external source via flat files. The main external sources we used were Factset and MarketQA.
+-   Security classification
+    -   Standard security classifications from external sources. The most commonly used were GICS and Russell.
+    -   Custom classifications derived from a standard classifications. This was typically done at the sector level but occasionally we go one level deeper.
+    -   Classification overrides for individual securities.
+-   Ranking algorithm was implemented in the database and could calculate ranks relative to these peer groupings: universe, sector, segment, country, region
+    -   We typically ranked in quintiles and deciles but the algorithm can rank to any arbitrary range.
+    -   Some models passed raw factor data to the database where all ranking and scoring was performed.
+    -   Other models passed pre-calculated ranks where processing was done in an external system and we simply loaded the output, bypassing internal processing.
+-   Performance calculation for: models, accounts, benchmarks
+    -   Cap-weighted or equal-weighted returns.
+    -   Returns can be run for any time period. Most portfolio managers were interested in MTD, QTD, YTD.
+-   Reporting, to answer questions such as:
+    -   What names rank well or poorly?
+    -   What factors are driving a particular stock's rank?
+    -   Which stocks have seen improvement/deterioration in rank in the last week/month?
+    -   How is the model performing vs my portfolio and vs the benchmark?
+    -   In what sectors is the model overweight/underweight vs the benchmark and vs my portfolio?
+    -   What is the value-weighted average rank of my portfolio holdings?
+
+Since the system went live in July 2006:
+
+-   We have had 40 models, of which 28 are currently processed daily.
+-   We have had 574 factors, of which 342 factors are currently used.
+-   On a typical day:
+    -   We load roughly 158,000 rows of factor data.
+    -   We process and load ranks for approximately 19,000 securities.
+
+General thoughts on system design - I find it is always a compromise between:
+
+-   Functionality - It should deliver on the explicitly stated requirements.
+-   Performance - It should be optimized for speed, which sometimes means creating workarounds.
+-   Flexibility and scalability - The design should be mindful of future changes and requirements. I think of these as the implied requirements.
+-   Maintainability - Understand that there are other people who will support the system who may not understand certain design decisions or complexities. Keeping it simple and understandable goes a long way towards ensuring system longevity. Otherwise your successor(s) will be inclined to replace it with something they do understand.
