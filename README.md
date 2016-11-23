@@ -2,7 +2,7 @@
 #### Kenneth Lee
 #### August 1, 2016
 
-<br> This was the database I built from 2005 to 2008. I was the sole architect and lead developer on the project. The database was built in Microsoft SQL Server 2005 and subsequently upgraded to SQL Server 2008. My responsibilities included:
+<br> This was the database I built from 2005 to 2008.  I was the sole architect and lead developer on the project. The database was built in Microsoft SQL Server 2005/2008 and processes were written in VB.NET.  My responsibilities included:
 
 -   database design / database architecture
 -   all database objects (tables, stored procedures, indexes, etc)
